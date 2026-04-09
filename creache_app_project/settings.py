@@ -9,8 +9,16 @@ https://docs.djangoproject.com/en/6.0/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 import os
 from dotenv import load_dotenv
+
+
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 
 from pathlib import Path
@@ -33,7 +41,7 @@ SECRET_KEY = 'django-insecure-6$90=)r$x2bau82k4ydk2^pay6*nvcau62^(x^7^(h_qei@d2d
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["192.168.0.165", "localhost", "127.0.0.1"]
 
 
 # Application definition

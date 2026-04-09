@@ -75,11 +75,11 @@ class CrecheAttendant(models.Model):
     creche = models.ForeignKey(Creche, on_delete=models.CASCADE, related_name='attendants')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='attendant_profiles')
     role = models.CharField(max_length=30, choices=ROLE_CHOICES)
-
+    face_encoding = models.BinaryField(null=True, blank=True) 
     mobile_no = models.CharField(max_length=30, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     photo = models.ImageField(upload_to='attendants/', blank=True, null=True)
-
+    attendant_name = models.CharField(max_length=200, blank=True, null=True)
     is_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

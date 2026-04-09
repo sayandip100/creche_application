@@ -15,16 +15,25 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.conf.urls.static import static
 from django.urls import path
-from creches.api.auth import LoginAPI
+from creache_app_project import settings
+from creache_app_project import settings
+from creches.api.auth import LoginAPI , AttendantRegisterAPI
 from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('login/', LoginAPI.as_view(), name='login'),
+    path('register/', AttendantRegisterAPI.as_view(), name='attendant-register'),
     path('reports/child-attendance/', ChildAttendanceReportAPI.as_view(), name='child-attendance-report'),
     path('reports/food-monitoring/', FoodMonitoringReportAPI.as_view(), name='food-monitoring-report'),
     path('reports/attendant-attendance/', AttendantAttendanceReportAPI.as_view(), name='attendant-attendance-report'),
 ]
+
+
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 

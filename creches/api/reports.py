@@ -13,7 +13,7 @@ class ChildAttendanceReportAPI(APIView):
         creche_id = request.data.get('creche_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
-
+        
         # -----------------------------
         # VALIDATION (ALL REQUIRED)
         # -----------------------------
@@ -363,3 +363,6 @@ class AttendantAttendanceReportAPI(APIView):
 
             "attendants": report_data
         }, status=status.HTTP_200_OK)
+        
+        
+        

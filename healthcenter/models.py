@@ -37,7 +37,7 @@ class Doctor(models.Model):
     mobile_no = models.CharField(max_length=20, blank=True, null=True)
     qualification = models.CharField(max_length=200, blank=True, null=True)
     specialization = models.CharField(max_length=200, blank=True, null=True)
-
+    name = models.CharField(max_length=200, blank=True, null=True)
     photo = models.ImageField(upload_to='doctors/', blank=True, null=True)
 
     is_active = models.BooleanField(default=True)
