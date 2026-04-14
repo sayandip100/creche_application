@@ -19,16 +19,22 @@ from django.conf.urls.static import static
 from django.urls import path
 from creache_app_project import settings
 from creache_app_project import settings
-from creches.api.auth import LoginAPI , AttendantRegisterAPI
-from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI
+from creches.api.auth import LoginAPI, AttendantRegisterAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI
+from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('login/', LoginAPI.as_view(), name='login'),
+    path('getrefreshtoken/', GetRefreshTokenAPI.as_view(), name='get-refresh-token'),
+    path('logout/', LogoutAPI.as_view(), name='logout'),
     path('register/', AttendantRegisterAPI.as_view(), name='attendant-register'),
     path('reports/child-attendance/', ChildAttendanceReportAPI.as_view(), name='child-attendance-report'),
     path('reports/food-monitoring/', FoodMonitoringReportAPI.as_view(), name='food-monitoring-report'),
+    path('reports/crechelist/', Creachelist.as_view(), name='creche-list'),
+    path('reports/healthcenterlist/', Healthcenterlist.as_view(), name='healthcenter-list'),
+    path('reports/teagardenlist/', Teagardenlist.as_view(), name='teagarden-list'),
     path('reports/attendant-attendance/', AttendantAttendanceReportAPI.as_view(), name='attendant-attendance-report'),
+    path('creches/create/', CrecheCreateAPI.as_view(), name='creche-create'),
 ]
 
 

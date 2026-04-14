@@ -39,7 +39,7 @@ class Doctor(models.Model):
     specialization = models.CharField(max_length=200, blank=True, null=True)
     name = models.CharField(max_length=200, blank=True, null=True)
     photo = models.ImageField(upload_to='doctors/', blank=True, null=True)
-
+    face_encoding = models.BinaryField(null=True, blank=True) 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -67,9 +67,9 @@ class Nurse(models.Model):
 
     mobile_no = models.CharField(max_length=20, blank=True, null=True)
     qualification = models.CharField(max_length=200, blank=True, null=True)
-
+    nurse_name = models.CharField(max_length=200, blank=True, null=True)
     photo = models.ImageField(upload_to='nurses/', blank=True, null=True)
-
+    face_encoding = models.BinaryField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

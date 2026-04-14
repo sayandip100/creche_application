@@ -4,12 +4,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
-from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring
+from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden
 from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, NurseAttendance
-from creches.serializers import LoginSerializer , AttendantRegisterSerializer
+from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer
 from django.contrib.auth import get_user_model
 
-from rest_framework.utils import timezone
+from django.utils import timezone
 from creches.utils import get_face_encoding
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
@@ -32,7 +32,6 @@ class LoginAPI(APIView):
 
         refresh = RefreshToken.for_user(user)
         data = {
-            'refresh': str(refresh),
             'access': str(refresh.access_token),
             'user_id': user.id,
             'username': user.username,
@@ -83,8 +82,13 @@ class LoginAPI(APIView):
 
             for c in creches:
                 attendants = [
-                    {'id': att.id, 'username': att.user.username, 'role': att.role}
-                    for att in c.attendants.all()
+                    {
+                        'id': att.id,
+                        'username': att.user.username if att.user else None,
+                        'role': att.role,
+                        'name': att.attendant_name
+                    }
+                    for att in c.attendants.select_related('user').all()
                 ]
                 children = [
                     {
@@ -225,6 +229,39 @@ class LoginAPI(APIView):
                 })
 
         return Response(data, status=status.HTTP_200_OK)
+
+
+class GetRefreshTokenAPI(APIView):
+    
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                #'refresh': str(refresh),
+                'refresh': str(refresh.access_token)
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class LogoutAPI(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Stateless JWT logout: client should delete the stored access/refresh tokens.
+        return Response(
+            {'detail': 'Successfully logged out.'},
+            status=status.HTTP_200_OK
+        )
+
+
+
+
+
     
 class AttendantRegisterAPI(APIView):
     permission_classes = [AllowAny]
@@ -234,48 +271,187 @@ class AttendantRegisterAPI(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # ✅ Create user
         new_user = User.objects.create_user(
             username=data['username'],
             password=data['password'],
             role=data['role']
         )
 
-        # ✅ Get creche directly
-        creche = Creche.objects.get(id=data['creche_id'])
+        try:
+            # =============================
+            # ATTENDANT
+            # =============================
+            if data['role'] in ['attendant', 'super_attendant']:
 
-        # ✅ Create attendant
-        attendant = CrecheAttendant.objects.create(
-            user=new_user,
-            creche=creche,
-            role=data['role'],
-            attendant_name=data['attendant_name'],
-            mobile_no=data.get('mobile_no'),
-            address=data.get('address'),
-            photo=data['photo']
+                tea_garden = TeaGarden.objects.get(id=data['tea_garden_id'])
+                creche = Creche.objects.get(
+                    id=data['creche_id'],
+                    tea_garden=tea_garden
+                )
+
+                attendant = CrecheAttendant.objects.create(
+                    user=new_user,
+                    creche=creche,
+                    role=data['role'],
+                    attendant_name=data.get('attendant_name'),
+                    mobile_no=data.get('mobile_no'),
+                    address=data.get('address'),
+                    photo=data['photo']
+                )
+
+                encoding, error = get_face_encoding(attendant.photo.path)
+
+                if error:
+                    attendant.delete()
+                    new_user.delete()
+                    return Response({"error": error}, status=400)
+
+                import pickle
+                attendant.face_encoding = pickle.dumps(encoding)
+                attendant.save()
+
+                return Response({
+                    "message": "Attendant registered successfully",
+                    "data": {
+                        "id": attendant.id,
+                        "username": new_user.username,
+                        "role": attendant.role,
+                        "tea_garden_id": tea_garden.id,
+                        "creche_id": creche.id,
+                        "photo_url": request.build_absolute_uri(attendant.photo.url)
+                    }
+                }, status=201)
+
+            # =============================
+            # DOCTOR
+            # =============================
+            elif data['role'] == 'doctor':
+
+                tea_garden = TeaGarden.objects.get(id=data['tea_garden_id'])
+                health_center = HealthCenter.objects.get(
+                    id=data['health_center_id'],
+                    tea_garden=tea_garden
+                )
+
+                doctor = Doctor.objects.create(
+                    user=new_user,
+                    health_center=health_center,
+                    name=data.get('doctor_name'),
+                    specialization=data.get('specialization'),
+                    qualification =data.get('qualification'),
+                    mobile_no=data.get('mobile_no'),
+                    photo=data['photo']
+                )
+
+                encoding, error = get_face_encoding(doctor.photo.path)
+
+                if error:
+                    doctor.delete()
+                    new_user.delete()
+                    return Response({"error": error}, status=400)
+
+                import pickle
+                doctor.face_encoding = pickle.dumps(encoding)
+                doctor.save()
+
+                return Response({
+                    "message": "Doctor registered successfully",
+                    "data": {
+                        "id": doctor.id,
+                        "username": new_user.username,
+                        "role": "doctor",
+                        "tea_garden_id": tea_garden.id,
+                        "health_center_id": health_center.id,
+                        "photo_url": request.build_absolute_uri(doctor.photo.url)
+                    }
+                }, status=201)
+
+            # =============================
+            # NURSE / HEAD NURSE
+            # =============================
+            elif data['role'] in ['head_nurse', 'nurse']:
+
+                tea_garden = TeaGarden.objects.get(id=data['tea_garden_id'])
+                health_center = HealthCenter.objects.get(
+                    id=data['health_center_id'],
+                    tea_garden=tea_garden
+                )
+
+                nurse = Nurse.objects.create(
+                    user=new_user,
+                    health_center=health_center,
+                    role=data['role'],  # ✅ important
+                    nurse_name=data.get('nurse_name'),
+                    mobile_no=data.get('mobile_no'),
+                    qualification =data.get('qualification'),
+                    photo=data['photo']
+                )
+
+                encoding, error = get_face_encoding(nurse.photo.path)
+
+                if error:
+                    nurse.delete()
+                    new_user.delete()
+                    return Response({"error": error}, status=400)
+
+                import pickle
+                nurse.face_encoding = pickle.dumps(encoding)
+                nurse.save()
+
+                return Response({
+                    "message": "Nurse registered successfully",
+                    "data": {
+                        "id": nurse.id,
+                        "username": new_user.username,
+                        "role": nurse.role,
+                        "tea_garden_id": tea_garden.id,
+                        "health_center_id": health_center.id,
+                        "photo_url": request.build_absolute_uri(nurse.photo.url)
+                    }
+                }, status=201)
+
+        except Exception as e:
+            new_user.delete()
+            return Response({"error": str(e)}, status=500)
+        
+        
+        
+        
+        
+        
+class CrecheCreateAPI(APIView):
+    permission_classes = [AllowAny]  # 🔥 change to IsAuthenticated later if needed
+
+    def post(self, request):
+        serializer = CrecheCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        # ✅ Get TeaGarden
+        tea_garden = TeaGarden.objects.get(id=data['tea_garden_id'])
+
+        # ✅ Create Creche
+        creche = Creche.objects.create(
+            creche_name=data['creche_name'],
+            creche_code=data['creche_code'],
+            tea_garden=tea_garden,
+            location_name=data['location'],
+            latitude=data['latitude'],
+            longitude=data['longitude'],
+            geo_radius_meters=data['geo_radius_meters'],
+            created_at=timezone.now()
         )
 
-        # ✅ Face encoding
-        encoding, error = get_face_encoding(attendant.photo.path)
-
-        if error:
-            attendant.delete()
-            new_user.delete()
-            return Response({"error": error}, status=400)
-
-        attendant.face_encoding = pickle.dumps(encoding)
-        attendant.save()
-
         return Response({
-            "message": "Attendant registered successfully",
+            "message": "Creche created successfully",
             "data": {
-                "id": attendant.id,
-                "username": new_user.username,
-                "attendant_name": attendant.attendant_name,
-                "role": attendant.role,
-                "creche_id": creche.id,
-                "photo_url": request.build_absolute_uri(attendant.photo.url) if attendant.photo else None
- 
+                "id": creche.id,
+                "creche_name": creche.creche_name,
+                "tea_garden_id": tea_garden.id,
+                "tea_garden_name": tea_garden.tea_garden_name,
+                "location": creche.location_name,
+                "latitude": creche.latitude,
+                "longitude": creche.longitude,
+                "geo_radius_meters": creche.geo_radius_meters
             }
-            
-        }, status=status.HTTP_201_CREATED)
+        }, status=201)

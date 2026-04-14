@@ -111,6 +111,7 @@ class Child(models.Model):
     contact_person_name = models.CharField(max_length=200, blank=True, null=True)
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
+    vector = models.BinaryField(null=True, blank=True)
 
     enrollment_date = models.DateField(auto_now_add=True)
     is_active = models.BooleanField(default=True)

@@ -1,9 +1,11 @@
 from datetime import datetime
 
+from healthcenter.models import HealthCenter
+#from healthcenter.models import HealthCenter
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from creches.models import Creche, Child, ChildAttendanceDetail , FoodMonitoring , AttendantAttendance , CrecheAttendant
+from creches.models import Creche, Child, ChildAttendanceDetail , FoodMonitoring , AttendantAttendance , CrecheAttendant , TeaGarden
 
 class ChildAttendanceReportAPI(APIView):
    
@@ -365,4 +367,58 @@ class AttendantAttendanceReportAPI(APIView):
         }, status=status.HTTP_200_OK)
         
         
+class Teagardenlist(APIView):
+    def get(self, request):
+        tea_gardens = TeaGarden.objects.all()
+        data = []
+        for tg in tea_gardens:
+            data.append({
+                "id": tg.id,
+                "tea_garden_code": tg.tea_garden_code,
+                "tea_garden_name": tg.tea_garden_name
+            })
+        return Response(data, status=status.HTTP_200_OK)
+    
+class Creachelist(APIView):
+     def post(self, request):
+         
+        tea_garden_id = request.data.get('tea_garden_id') 
         
+        if not all([tea_garden_id]):
+            return Response(
+                {"error": "tea_garden_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        creches = Creche.objects.filter(tea_garden_id=tea_garden_id)
+        data = []
+        for c in creches:
+            data.append({
+                "id": c.id,
+                "creche_code": c.creche_code,
+                "creche_name": c.creche_name
+            })
+        return Response(data, status=status.HTTP_200_OK)
+    
+class Healthcenterlist(APIView):
+     def post(self, request):
+         
+        tea_garden_id = request.data.get('tea_garden_id') 
+        
+        if not all([tea_garden_id]):
+            return Response(
+                {"error": "tea_garden_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        health_centers = HealthCenter.objects.filter(tea_garden_id=tea_garden_id)
+        data = []
+        for hc in health_centers:
+            data.append({
+                "id": hc.id,
+                "code": hc.code,
+                "name": hc.name
+            })
+        return Response(data, status=status.HTTP_200_OK)    
+    
+    
