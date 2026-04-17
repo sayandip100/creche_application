@@ -1,12 +1,13 @@
 # creches/api/auth.py
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
-from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden
+from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding
 from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, NurseAttendance
-from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer
+from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer, ChildRegisterSerializer
 from django.contrib.auth import get_user_model
 
 from django.utils import timezone
@@ -14,6 +15,8 @@ from creches.utils import get_face_encoding
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
 import pickle
+import requests
+import json
 
 from rest_framework.permissions import AllowAny
 
@@ -33,6 +36,7 @@ class LoginAPI(APIView):
         refresh = RefreshToken.for_user(user)
         data = {
             'access': str(refresh.access_token),
+            #'refresh': str(refresh.refresh_token),
             'user_id': user.id,
             'username': user.username,
             'role': user.role,
@@ -242,7 +246,8 @@ class GetRefreshTokenAPI(APIView):
         return Response(
             {
                 #'refresh': str(refresh),
-                'refresh': str(refresh.access_token)
+                 'access': str(refresh.access_token),
+                'refresh': str(refresh.refresh_token)
             },
             status=status.HTTP_200_OK
         )
@@ -419,6 +424,171 @@ class AttendantRegisterAPI(APIView):
         
         
         
+class ChildRegisterAPI(APIView):
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        serializer = ChildRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        creche = Creche.objects.get(id=data['creche_id'])
+
+        child = Child.objects.create(
+            creche=creche,
+            name=data['name'],
+            photo=data.get('photo'),
+            age_years=data.get('age_years'),
+            gender=data.get('gender'),
+            height_cm=data.get('height_cm'),
+            weight_kg=data.get('weight_kg'),
+            guardian_name=data.get('guardian_name'),
+            contact_person_name=data.get('contact_person_name'),
+            contact_phone=data.get('contact_phone'),
+            address=data.get('address'),
+            created_by=request.user if request.user.is_authenticated else None
+        )
+
+        # Handle multiple extra photos
+        photos = data.get('photos', [])
+        child_photos = []
+        for photo in photos:
+            cp = ChildPhoto.objects.create(child=child, photo=photo)
+            child_photos.append(cp)
+
+        # Get photo URLs
+        photo_urls = [request.build_absolute_uri(p.photo.url) for p in child_photos]
+
+        # Call external embedding API
+        embeddings_response = None
+        embeddings_count = 0
+        try:
+            embedding_api_url = "http://192.168.0.201:8000/api/v1/childregister"
+            
+            print(f"[DEBUG] Preparing to call embedding API: {embedding_api_url}")
+            print(f"[DEBUG] Total photos to send: {len(child_photos)}")
+            
+            # Prepare files for the embedding API (read into memory first)
+            files = []
+            for idx, cp in enumerate(child_photos):
+                try:
+                    with open(cp.photo.path, 'rb') as f:
+                        file_content = f.read()
+                        files.append(('photo', (cp.photo.name, file_content)))
+                       # print(f"[DEBUG] Added photo {idx}: {cp.photo.name} ({len(file_content)} bytes)")
+                except Exception as photo_error:
+                    print(f"[DEBUG] Error reading photo {idx}: {photo_error}")
+            
+           # print(f"[DEBUG] Total files prepared: {len(files)}")
+            
+            # Call the embedding API
+            print(f"[DEBUG] Calling embedding API...")
+            embedding_response = requests.post(
+                embedding_api_url,
+                files=files,
+                timeout=30
+            )
+            
+            print(f"[DEBUG] API Response Status: {embedding_response.status_code}")
+            print(f"[DEBUG] API Response: {embedding_response.text}")
+            
+            if embedding_response.status_code == 200:
+                embeddings_response = embedding_response.json()
+                embeddings_list = embeddings_response.get('embeddings', [])
+                embeddings_count = len(embeddings_list)
+                print(f"[DEBUG] Embeddings received: {embeddings_count}")
+                
+                # Store embeddings in ChildPhotoEmbedding table
+                for idx, embedding_data in enumerate(embeddings_list):
+                    if idx < len(child_photos):
+                        child_photo = child_photos[idx]
+                        # Serialize embedding as pickle
+                        embedding_bytes = pickle.dumps(embedding_data)
+                        ChildPhotoEmbedding.objects.create(
+                            child_photo=child_photo,
+                            child=child,
+                            embedding=embedding_bytes
+                        )
+            else:
+                print(f"[DEBUG] API returned non-200 status: {embedding_response.status_code}")
+                embeddings_response = {"error": f"API returned {embedding_response.status_code}", "details": embedding_response.text}
+        except Exception as e:
+            print(f"[DEBUG] Exception calling embedding API: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            embeddings_response = {"error": str(e)}
+
+        return Response({
+            "message": "Child registered successfully",
+            "data": {
+                "id": child.id,
+                "creche_id": creche.id,
+                "name": child.name,
+                "photo_url": request.build_absolute_uri(child.photo.url) if child.photo else None,
+                "photo_urls": photo_urls,
+                "age_years": child.age_years,
+                "gender": child.gender,
+                "height_cm": child.height_cm,
+                "weight_kg": child.weight_kg,
+                "guardian_name": child.guardian_name,
+                "contact_person_name": child.contact_person_name,
+                "contact_phone": child.contact_phone,
+                "address": child.address,
+                "created_by": request.user.username if request.user.is_authenticated else None
+            },
+            "embeddings": {
+                "message": "Embeddings generated successfully" if embeddings_count > 0 else "No embeddings generated",
+                "embeddings_count": embeddings_count,
+                #"api_response": embeddings_response
+            }
+        }, status=201)
+        
+        
+
+
+class ChildListAPI(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        creche_id = request.data.get('creche_id')
+        
+        if not creche_id:
+            return Response({"error": "creche_id is required"}, status=400)
+        
+        try:
+            creche = Creche.objects.get(id=creche_id)
+        except Creche.DoesNotExist:
+            return Response({"error": "Creche not found"}, status=404)
+        
+        children = Child.objects.filter(creche=creche).all()
+        
+        children_data = []
+        for child in children:
+            # Get primary photo
+            photo_url = request.build_absolute_uri(child.photo.url) if child.photo else None
+            
+            # Get gallery photos
+            gallery_urls = [request.build_absolute_uri(p.photo.url) for p in child.photos.all()]
+            
+            children_data.append({
+                'id': child.id,
+                'name': child.name,
+                'age_years': child.age_years,
+                'gender': child.gender,
+                'photo_url': photo_url,
+                'gallery_urls': gallery_urls,
+                'created_at': child.created_at
+            })
+        
+        return Response({
+            'creche_id': creche.id,
+            'creche_name': creche.creche_name,
+            'children_count': len(children_data),
+            'children': children_data
+        }, status=200)
+
+
 class CrecheCreateAPI(APIView):
     permission_classes = [AllowAny]  # 🔥 change to IsAuthenticated later if needed
 

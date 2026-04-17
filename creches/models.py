@@ -129,6 +129,35 @@ class Child(models.Model):
 
 
 # -----------------------------
+# Child Photo
+# -----------------------------
+class ChildPhoto(models.Model):
+    child = models.ForeignKey(Child, on_delete=models.CASCADE, related_name='photos')
+    photo = models.ImageField(upload_to='children/photos/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.child.name} - Photo {self.id}"
+
+
+# -----------------------------
+# Child Photo Embedding
+# -----------------------------
+class ChildPhotoEmbedding(models.Model):
+    child_photo = models.ForeignKey(ChildPhoto, on_delete=models.CASCADE, related_name='embeddings')
+    child = models.ForeignKey(Child, on_delete=models.CASCADE, related_name='photo_embeddings')
+    embedding = models.BinaryField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('child_photo', 'child')
+
+    def __str__(self):
+        return f"{self.child.name} - Embedding for Photo {self.child_photo.id}"
+
+
+# -----------------------------
 # Child Attendance
 # -----------------------------
 class ChildAttendance(models.Model):

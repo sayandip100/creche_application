@@ -86,3 +86,27 @@ class CrecheCreateSerializer(serializers.Serializer):
         if not TeaGarden.objects.filter(id=data['tea_garden_id']).exists():
             raise serializers.ValidationError("Invalid tea_garden_id")
         return data
+
+
+class ChildRegisterSerializer(serializers.Serializer):
+    creche_id = serializers.IntegerField()
+    name = serializers.CharField()
+    photo = serializers.ImageField(required=False, allow_null=True)
+    photos = serializers.ListField(
+        child=serializers.ImageField(),
+        required=False,
+        allow_empty=True
+    )
+    age_years = serializers.IntegerField(required=False, allow_null=True)
+    gender = serializers.CharField(required=False, allow_blank=True)
+    height_cm = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+    weight_kg = serializers.DecimalField(max_digits=6, decimal_places=2, required=False, allow_null=True)
+    guardian_name = serializers.CharField(required=False, allow_blank=True)
+    contact_person_name = serializers.CharField(required=False, allow_blank=True)
+    contact_phone = serializers.CharField(required=False, allow_blank=True)
+    address = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_creche_id(self, value):
+        if not Creche.objects.filter(id=value).exists():
+            raise serializers.ValidationError("Invalid creche_id")
+        return value

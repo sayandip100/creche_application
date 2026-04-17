@@ -17,9 +17,9 @@ Including another URLconf
 from django.contrib import admin
 from django.conf.urls.static import static
 from django.urls import path
+
 from creache_app_project import settings
-from creache_app_project import settings
-from creches.api.auth import LoginAPI, AttendantRegisterAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI
+from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI
 from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist
 
 urlpatterns = [
@@ -28,6 +28,8 @@ urlpatterns = [
     path('getrefreshtoken/', GetRefreshTokenAPI.as_view(), name='get-refresh-token'),
     path('logout/', LogoutAPI.as_view(), name='logout'),
     path('register/', AttendantRegisterAPI.as_view(), name='attendant-register'),
+    path('childrenregister/', ChildRegisterAPI.as_view(), name='child-register'),
+    path('children/list/', ChildListAPI.as_view(), name='child-list'),
     path('reports/child-attendance/', ChildAttendanceReportAPI.as_view(), name='child-attendance-report'),
     path('reports/food-monitoring/', FoodMonitoringReportAPI.as_view(), name='food-monitoring-report'),
     path('reports/crechelist/', Creachelist.as_view(), name='creche-list'),
