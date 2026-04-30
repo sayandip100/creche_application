@@ -19,8 +19,8 @@ from django.conf.urls.static import static
 from django.urls import path
 
 from creache_app_project import settings
-from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI
-from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist
+from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI 
+from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -37,6 +37,10 @@ urlpatterns = [
     path('reports/teagardenlist/', Teagardenlist.as_view(), name='teagarden-list'),
     path('reports/attendant-attendance/', AttendantAttendanceReportAPI.as_view(), name='attendant-attendance-report'),
     path('creches/create/', CrecheCreateAPI.as_view(), name='creche-create'),
+    path('reports/children/', CrecheChildDetailsAPI.as_view(), name='creche-child-details'),
+    path('reports/attendant/details/', AttendantDetailsAPI.as_view(), name='attendant-details'),
+    path('reports/crechedetails/', CrecheDetailsAPI.as_view(), name='creche-details'),
+    path('reports/healthcenter/details/', HealthCenterDetailsAPI.as_view(), name='health-center-details'),
 ]
 
 

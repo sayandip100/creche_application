@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding
-from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, NurseAttendance
+from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, MedicineStockTransaction, PatientTreatmentMedicine, WeeklyMedicineRequisition, WeeklyMedicineRequisitionDetail, DoctorAttendance, NurseAttendance
 from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer, ChildRegisterSerializer
 from django.contrib.auth import get_user_model
 
@@ -239,6 +239,9 @@ class GetRefreshTokenAPI(APIView):
     
     permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        return Response({"error": "Method not allowed. Use POST."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
     def post(self, request):
         user = request.user
 
@@ -247,7 +250,7 @@ class GetRefreshTokenAPI(APIView):
             {
                 #'refresh': str(refresh),
                  'access': str(refresh.access_token),
-                'refresh': str(refresh.refresh_token)
+                'refresh': str(refresh)
             },
             status=status.HTTP_200_OK
         )
@@ -543,7 +546,8 @@ class ChildRegisterAPI(APIView):
                 #"api_response": embeddings_response
             }
         }, status=201)
-        
+
+
         
 
 
