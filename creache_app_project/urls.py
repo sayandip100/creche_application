@@ -21,6 +21,7 @@ from django.urls import path
 from creache_app_project import settings
 from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI 
 from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI
+from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -41,11 +42,15 @@ urlpatterns = [
     path('reports/attendant/details/', AttendantDetailsAPI.as_view(), name='attendant-details'),
     path('reports/crechedetails/', CrecheDetailsAPI.as_view(), name='creche-details'),
     path('reports/healthcenter/details/', HealthCenterDetailsAPI.as_view(), name='health-center-details'),
+
+    # Child Attendance API
+    path('attendance/mark/', MarkAttendanceAPI.as_view(), name='attendance-mark'),
+    path('attendance/by-date/', GetAttendanceByDateAPI.as_view(), name='attendance-by-date'),
+    path('attendance/child-history/', ChildAttendanceHistoryAPI.as_view(), name='attendance-child-history'),
+    path('attendance/date-range/', AttendanceByDateRangeAPI.as_view(), name='attendance-date-range'),
 ]
 
 
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
-
