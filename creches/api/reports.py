@@ -1,5 +1,6 @@
 from datetime import datetime
 from django.db import models
+from rest_framework.permissions import IsAuthenticated
 
 from healthcenter.models import (
     HealthCenter, Nurse, NurseAttendance, PatientTreatment, DoctorAttendance,
@@ -372,6 +373,8 @@ class AttendantAttendanceReportAPI(APIView):
         
         
 class Teagardenlist(APIView):
+    
+    permission_classes = [IsAuthenticated]
     def get(self, request):
         tea_gardens = TeaGarden.objects.all()
         data = []

@@ -34,12 +34,26 @@ class LoginAPI(APIView):
         user = serializer.validated_data['user']
 
         refresh = RefreshToken.for_user(user)
+        
+        # Get name based on role
+        name = None
+        if user.role in ['attendant', 'super_attendant']:
+            attendant = CrecheAttendant.objects.filter(user=user).first()
+            name = attendant.attendant_name if attendant else None
+        elif user.role == 'doctor':
+            doctor = Doctor.objects.filter(user=user).first()
+            name = doctor.name if doctor else None
+        elif user.role in ['nurse', 'head_nurse']:
+            nurse = Nurse.objects.filter(user=user).first()
+            name = nurse.nurse_name if nurse else None
+        
         data = {
             'access': str(refresh.access_token),
             #'refresh': str(refresh.refresh_token),
             'user_id': user.id,
             'username': user.username,
             'role': user.role,
+            'name': name,
         }
 
         # -----------------------------
@@ -174,8 +188,11 @@ class LoginAPI(APIView):
             creche_links = CrecheAttendant.objects.filter(user=user).select_related('creche__tea_garden')
             data['creches'] = []
 
+            tea_garden_id = None
             for cl in creche_links:
                 c = cl.creche
+                if tea_garden_id is None:
+                    tea_garden_id = c.tea_garden.id
                 children = [
                     {
                         'id': child.id,
@@ -200,6 +217,7 @@ class LoginAPI(APIView):
                     'children': children,
                     'food_monitorings': food_monitorings
                 })
+            data['tea_garden_id'] = tea_garden_id
 
         # -----------------------------
         # HEALTH STAFF (doctor, head_nurse, nurse)
@@ -208,12 +226,15 @@ class LoginAPI(APIView):
             staff = list(Doctor.objects.filter(user=user)) + list(Nurse.objects.filter(user=user))
             seen = set()
             data['health_centers'] = []
+            tea_garden_id = None
 
             for s in staff:
                 hc = s.health_center
                 if hc.id in seen:
                     continue
                 seen.add(hc.id)
+                if tea_garden_id is None:
+                    tea_garden_id = hc.tea_garden.id
 
                 patients = [{'id': pt.id, 'patient_name': pt.patient_name, 'age': pt.age} for pt in hc.treatments.all()]
                 medicines = [{'id': m.id, 'name': m.medicine_name, 'code': m.medicine_code} for m in Medicine.objects.all()]
@@ -231,6 +252,8 @@ class LoginAPI(APIView):
                     'doctor_attendance': doctor_attendance,
                     'nurse_attendance': nurse_attendance
                 })
+            
+            data['tea_garden_id'] = tea_garden_id
 
         return Response(data, status=status.HTTP_200_OK)
 
@@ -296,7 +319,7 @@ class AttendantRegisterAPI(APIView):
                     id=data['creche_id'],
                     tea_garden=tea_garden
                 )
-
+                
                 attendant = CrecheAttendant.objects.create(
                     user=new_user,
                     creche=creche,
@@ -523,29 +546,31 @@ class ChildRegisterAPI(APIView):
             embeddings_response = {"error": str(e)}
 
         return Response({
-            "message": "Child registered successfully",
-            "data": {
-                "id": child.id,
-                "creche_id": creche.id,
-                "name": child.name,
-                "photo_url": request.build_absolute_uri(child.photo.url) if child.photo else None,
-                "photo_urls": photo_urls,
-                "age_years": child.age_years,
-                "gender": child.gender,
-                "height_cm": child.height_cm,
-                "weight_kg": child.weight_kg,
-                "guardian_name": child.guardian_name,
-                "contact_person_name": child.contact_person_name,
-                "contact_phone": child.contact_phone,
-                "address": child.address,
-                "created_by": request.user.username if request.user.is_authenticated else None
-            },
-            "embeddings": {
-                "message": "Embeddings generated successfully" if embeddings_count > 0 else "No embeddings generated",
-                "embeddings_count": embeddings_count,
-                #"api_response": embeddings_response
-            }
-        }, status=201)
+            "status_code": 200,
+            "message": "success",
+            "data": [
+                {
+                    "id": child.id,
+                    "creche_id": creche.id,
+                    "name": child.name,
+                    "photo_url": request.build_absolute_uri(child.photo.url) if child.photo else None,
+                    "photo_urls": photo_urls,
+                    "age_years": child.age_years,
+                    "gender": child.gender,
+                    "height_cm": child.height_cm,
+                    "weight_kg": child.weight_kg,
+                    "guardian_name": child.guardian_name,
+                    "contact_person_name": child.contact_person_name,
+                    "contact_phone": child.contact_phone,
+                    "address": child.address,
+                    "created_by": request.user.username if request.user.is_authenticated else None
+                },
+                {
+                    "embeddings_message": "Embeddings generated successfully" if embeddings_count > 0 else "No embeddings generated",
+                    "embeddings_count": embeddings_count
+                }
+            ]
+        }, status=200)
 
 
         
