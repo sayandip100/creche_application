@@ -5,7 +5,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
-from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding
+from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding, ChildGrowthMonitoring
 from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, MedicineStockTransaction, PatientTreatmentMedicine, WeeklyMedicineRequisition, WeeklyMedicineRequisitionDetail, DoctorAttendance, NurseAttendance
 from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer, ChildRegisterSerializer
 from django.contrib.auth import get_user_model
@@ -47,9 +47,8 @@ class LoginAPI(APIView):
             nurse = Nurse.objects.filter(user=user).first()
             name = nurse.nurse_name if nurse else None
         
+        # Main data structure
         data = {
-            'access': str(refresh.access_token),
-            #'refresh': str(refresh.refresh_token),
             'user_id': user.id,
             'username': user.username,
             'role': user.role,
@@ -255,7 +254,10 @@ class LoginAPI(APIView):
             
             data['tea_garden_id'] = tea_garden_id
 
-        return Response(data, status=status.HTTP_200_OK)
+        return Response({
+            'access': str(refresh.access_token),
+            'data': data
+        }, status=status.HTTP_200_OK)
 
 
 class GetRefreshTokenAPI(APIView):
@@ -461,52 +463,39 @@ class ChildRegisterAPI(APIView):
 
         creche = Creche.objects.get(id=data['creche_id'])
 
-        child = Child.objects.create(
-            creche=creche,
-            name=data['name'],
-            photo=data.get('photo'),
-            age_years=data.get('age_years'),
-            gender=data.get('gender'),
-            height_cm=data.get('height_cm'),
-            weight_kg=data.get('weight_kg'),
-            guardian_name=data.get('guardian_name'),
-            contact_person_name=data.get('contact_person_name'),
-            contact_phone=data.get('contact_phone'),
-            address=data.get('address'),
-            created_by=request.user if request.user.is_authenticated else None
-        )
-
-        # Handle multiple extra photos
+        # Get photos from request
         photos = data.get('photos', [])
-        child_photos = []
-        for photo in photos:
-            cp = ChildPhoto.objects.create(child=child, photo=photo)
-            child_photos.append(cp)
-
-        # Get photo URLs
-        photo_urls = [request.build_absolute_uri(p.photo.url) for p in child_photos]
-
-        # Call external embedding API
+        
+        # Prepare files for embedding API BEFORE creating child
+        files = []
+        for idx, photo in enumerate(photos):
+            try:
+                files.append(('photo', (photo.name, photo.read())))
+            except Exception as photo_error:
+                print(f"[DEBUG] Error reading photo {idx}: {photo_error}")
+                return Response({
+                    "status_code": 400,
+                    "message": "error",
+                    "error": f"Failed to read photo {idx}: {str(photo_error)}"
+                }, status=400)
+        
+        # Call embedding API FIRST before creating any child records
         embeddings_response = None
         embeddings_count = 0
+        embeddings_list = []
+        
         try:
-            embedding_api_url = "http://192.168.0.201:8000/api/v1/childregister"
+            embedding_api_url = "http://45.64.107.97:5010/api/v1/childregister"
             
             print(f"[DEBUG] Preparing to call embedding API: {embedding_api_url}")
-            print(f"[DEBUG] Total photos to send: {len(child_photos)}")
+            print(f"[DEBUG] Total photos to send: {len(files)}")
             
-            # Prepare files for the embedding API (read into memory first)
-            files = []
-            for idx, cp in enumerate(child_photos):
-                try:
-                    with open(cp.photo.path, 'rb') as f:
-                        file_content = f.read()
-                        files.append(('photo', (cp.photo.name, file_content)))
-                       # print(f"[DEBUG] Added photo {idx}: {cp.photo.name} ({len(file_content)} bytes)")
-                except Exception as photo_error:
-                    print(f"[DEBUG] Error reading photo {idx}: {photo_error}")
-            
-           # print(f"[DEBUG] Total files prepared: {len(files)}")
+            if len(files) == 0:
+                return Response({
+                    "status_code": 400,
+                    "message": "error",
+                    "error": "No photos provided"
+                }, status=400)
             
             # Call the embedding API
             print(f"[DEBUG] Calling embedding API...")
@@ -519,58 +508,110 @@ class ChildRegisterAPI(APIView):
             print(f"[DEBUG] API Response Status: {embedding_response.status_code}")
             print(f"[DEBUG] API Response: {embedding_response.text}")
             
-            if embedding_response.status_code == 200:
-                embeddings_response = embedding_response.json()
-                embeddings_list = embeddings_response.get('embeddings', [])
-                embeddings_count = len(embeddings_list)
-                print(f"[DEBUG] Embeddings received: {embeddings_count}")
-                
-                # Store embeddings in ChildPhotoEmbedding table
-                for idx, embedding_data in enumerate(embeddings_list):
-                    if idx < len(child_photos):
-                        child_photo = child_photos[idx]
-                        # Serialize embedding as pickle
-                        embedding_bytes = pickle.dumps(embedding_data)
-                        ChildPhotoEmbedding.objects.create(
-                            child_photo=child_photo,
-                            child=child,
-                            embedding=embedding_bytes
-                        )
-            else:
+            if embedding_response.status_code != 200:
                 print(f"[DEBUG] API returned non-200 status: {embedding_response.status_code}")
-                embeddings_response = {"error": f"API returned {embedding_response.status_code}", "details": embedding_response.text}
+                return Response({
+                    "status_code": 400,
+                    "message": "Embedding generation failed",
+                    "error": f"API returned {embedding_response.status_code}",
+                    "details": embedding_response.text
+                }, status=200)
+            
+            embeddings_response = embedding_response.json()
+            embeddings_list = embeddings_response.get('embeddings', [])
+            embeddings_count = len(embeddings_list)
+            
+            if embeddings_count == 0:
+                return Response({
+                    "status_code": 400,
+                    "message": "No embeddings generated",
+                    "error": "Embedding API returned no embeddings"
+                }, status=400)
+            
+            print(f"[DEBUG] Embeddings received: {embeddings_count}")
+            
+            # ✅ Embeddings successful - Now create child
+            child = Child.objects.create(
+                creche=creche,
+                name=data['name'],
+                photo=data.get('photo'),
+                age_years=data.get('age_years'),
+                gender=data.get('gender'),
+                height_cm=data.get('height_cm'),
+                weight_kg=data.get('weight_kg'),
+                guardian_name=data.get('guardian_name'),
+                contact_person_name=data.get('contact_person_name'),
+                contact_phone=data.get('contact_phone'),
+                address=data.get('address'),
+                created_by=request.user if request.user.is_authenticated else None
+            )
+            
+            # Now create child photos with the child reference
+            child_photos = []
+            for photo in photos:
+                cp = ChildPhoto.objects.create(child=child, photo=photo)
+                child_photos.append(cp)
+            
+            # Get photo URLs
+            photo_urls = [request.build_absolute_uri(p.photo.url) for p in child_photos]
+            
+            # Store embeddings in ChildPhotoEmbedding table
+            for idx, embedding_data in enumerate(embeddings_list):
+                if idx < len(child_photos):
+                    child_photo = child_photos[idx]
+                    # Serialize embedding as pickle
+                    embedding_bytes = pickle.dumps(embedding_data)
+                    ChildPhotoEmbedding.objects.create(
+                        child_photo=child_photo,
+                        child=child,
+                        embedding=embedding_bytes
+                    )
+            
+            # ✅ Store child height and weight in ChildGrowthMonitoring
+            ChildGrowthMonitoring.objects.create(
+                child=child,
+                height_cm=data.get('height_cm'),
+                weight_kg=data.get('weight_kg'),
+                created_at= timezone.now(),
+                measured_on =  timezone.now()
+            )
+            
+            return Response({
+                "status_code": 200,
+                "message": "success",
+                "data": [
+                    {
+                        "id": child.id,
+                        "creche_id": creche.id,
+                        "name": child.name,
+                        "photo_url": request.build_absolute_uri(child.photo.url) if child.photo else None,
+                        "photo_urls": photo_urls,
+                        "age_years": child.age_years,
+                        "gender": child.gender,
+                        "height_cm": child.height_cm,
+                        "weight_kg": child.weight_kg,
+                        "guardian_name": child.guardian_name,
+                        "contact_person_name": child.contact_person_name,
+                        "contact_phone": child.contact_phone,
+                        "address": child.address,
+                        "created_by": request.user.username if request.user.is_authenticated else None
+                    },
+                    {
+                        "embeddings_message": "Embeddings generated successfully",
+                        "embeddings_count": embeddings_count
+                    }
+                ]
+            }, status=200)
+            
         except Exception as e:
-            print(f"[DEBUG] Exception calling embedding API: {type(e).__name__}: {str(e)}")
+            print(f"[DEBUG] Exception: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
-            embeddings_response = {"error": str(e)}
-
-        return Response({
-            "status_code": 200,
-            "message": "success",
-            "data": [
-                {
-                    "id": child.id,
-                    "creche_id": creche.id,
-                    "name": child.name,
-                    "photo_url": request.build_absolute_uri(child.photo.url) if child.photo else None,
-                    "photo_urls": photo_urls,
-                    "age_years": child.age_years,
-                    "gender": child.gender,
-                    "height_cm": child.height_cm,
-                    "weight_kg": child.weight_kg,
-                    "guardian_name": child.guardian_name,
-                    "contact_person_name": child.contact_person_name,
-                    "contact_phone": child.contact_phone,
-                    "address": child.address,
-                    "created_by": request.user.username if request.user.is_authenticated else None
-                },
-                {
-                    "embeddings_message": "Embeddings generated successfully" if embeddings_count > 0 else "No embeddings generated",
-                    "embeddings_count": embeddings_count
-                }
-            ]
-        }, status=200)
+            return Response({
+                "status_code": 500,
+                "message": "error",
+                "error": str(e)
+            }, status=500)
 
 
         
