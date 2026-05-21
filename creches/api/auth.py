@@ -13,6 +13,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from creches.utils import get_face_encoding
 from rest_framework.permissions import IsAuthenticated
+import numpy as np
 from django.db import transaction
 import pickle
 import requests
@@ -261,24 +262,105 @@ class LoginAPI(APIView):
 
 
 class GetRefreshTokenAPI(APIView):
+    """
+    API endpoint to refresh an expired access token using a valid refresh token.
     
-    permission_classes = [IsAuthenticated]
+    Accepts POST with JSON body:
+    {
+        "refresh_token": "<your-refresh-token-string>"
+    }
+    
+    Returns a new access token and refresh token pair.
+    """
+    permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response({"error": "Method not allowed. Use POST."}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+        return Response({
+            "status_code": 405,
+            "message": "Method not allowed. Use POST.",
+            "data": {}
+        }, status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def post(self, request):
-        user = request.user
-
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                #'refresh': str(refresh),
-                 'access': str(refresh.access_token),
-                'refresh': str(refresh)
-            },
-            status=status.HTTP_200_OK
-        )
+        refresh_token_str = request.data.get('refresh_token')
+        
+        if not refresh_token_str:
+            return Response(
+                {
+                    "status_code": 400,
+                    "message": "refresh_token is required in request body",
+                    "data": {}
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+            from rest_framework_simplejwt.tokens import AccessToken
+            
+            # First, verify this is a refresh token and not an access token
+            try:
+                # Try to decode as access token - should fail if it's a refresh token
+                AccessToken(refresh_token_str)
+                return Response(
+                    {
+                        "status_code": 400,
+                        "message": "You passed an access token, but a refresh token is required. Please use the refresh_token from your login response, not the access_token.",
+                        "data": {}
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except:
+                # Good - it's not an access token, proceed with refresh token validation
+                pass
+            
+            # Validate the refresh token and get new tokens
+            refresh = RefreshToken(refresh_token_str)
+            
+            # Generate new tokens
+            new_access = str(refresh.access_token)
+            new_refresh = str(refresh)
+            
+            return Response(
+                {
+                    "status_code": 200,
+                    "message": "Token refreshed successfully",
+                    "data": {
+                        "access_token": new_access,
+                        "refresh_token": new_refresh
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+            
+        except (TokenError, InvalidToken) as e:
+            error_message = str(e)
+            if "Token has wrong type" in error_message:
+                return Response(
+                    {
+                        "status_code": 400,
+                        "message": "Invalid token type. Make sure you're using the 'refresh_token' from login response, not the 'access_token'.",
+                        "data": {}
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                {
+                    "status_code": 401,
+                    "message": f"Invalid or expired refresh token: {str(e)}",
+                    "data": {}
+                },
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "status_code": 500,
+                    "message": f"An error occurred: {str(e)}",
+                    "data": {}
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class LogoutAPI(APIView):
@@ -294,8 +376,85 @@ class LogoutAPI(APIView):
 
 
 
-
     
+
+class MobileLoginAPI(APIView):
+    """
+    Mobile Login API - Returns simplified login response for mobile clients
+    Supports all user roles: superadmin, attendant, super_attendant, doctor, head_nurse, nurse
+    Includes: user info, access token, tea_garden_id, and login timestamp
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # Validate user and generate JWT
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+
+        # Generate refresh token (access token is derived from it)
+        refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
+        
+        # Get current login time
+        login_time = timezone.now()
+
+        # Get name based on role
+        name = None
+        attendant = None
+        doctor = None
+        nurse = None
+        staff = None
+        
+        if user.role in ['attendant', 'super_attendant']:
+            attendant = CrecheAttendant.objects.filter(user=user).first()
+            name = attendant.attendant_name if attendant else None
+        elif user.role == 'doctor':
+            doctor = Doctor.objects.filter(user=user).first()
+            name = doctor.name if doctor else None
+        elif user.role in ['nurse', 'head_nurse']:
+            nurse = Nurse.objects.filter(user=user).first()
+            name = nurse.nurse_name if nurse else None
+
+        # Get tea_garden_id based on role
+        tea_garden_id = None
+        if user.role in ['attendant', 'super_attendant']:
+            # For attendants, get tea_garden from associated creche
+            attendant = CrecheAttendant.objects.filter(user=user).select_related('creche__tea_garden').first()
+            if attendant and attendant.creche:
+                tea_garden_id = attendant.creche.tea_garden.id
+        elif user.role in ['doctor', 'head_nurse', 'nurse']:
+            # For health staff, get tea_garden from associated health center
+            staff = Doctor.objects.filter(user=user).select_related('health_center__tea_garden').first() or \
+                    Nurse.objects.filter(user=user).select_related('health_center__tea_garden').first()
+            if staff and staff.health_center:
+                tea_garden_id = staff.health_center.tea_garden.id
+
+        # Build mobile response
+        user_data = {
+            'refresh_token': str(refresh),
+            'user_id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'name': name,
+            'login_time': login_time.isoformat(),
+            'tea_garden_id': tea_garden_id,
+            'creache_id' : attendant.creche.id if user.role in ['attendant', 'super_attendant'] and attendant and attendant.creche else None,
+            'health_center_id' : staff.health_center.id if user.role in ['doctor', 'head_nurse', 'nurse'] and staff and staff.health_center else None
+        }
+
+        return Response({
+            'status_code': 200,
+            'message': 'success',
+            'data': {
+                'access_token': access_token,
+                'refresh_token': str(refresh),
+                'token_type': 'Bearer',
+                'expires_in': 300,  # 5 minutes
+                'user_data': user_data
+            }
+        }, status=status.HTTP_200_OK)
+
 class AttendantRegisterAPI(APIView):
     permission_classes = [AllowAny]
 
@@ -560,7 +719,8 @@ class ChildRegisterAPI(APIView):
                 if idx < len(child_photos):
                     child_photo = child_photos[idx]
                     # Serialize embedding as pickle
-                    embedding_bytes = pickle.dumps(embedding_data)
+                    #embedding_bytes = pickle.dumps(embedding_data)
+                    embedding_bytes = np.array(embedding_data, dtype=np.float32).tobytes()
                     ChildPhotoEmbedding.objects.create(
                         child_photo=child_photo,
                         child=child,
@@ -618,20 +778,35 @@ class ChildRegisterAPI(APIView):
 
 
 class ChildListAPI(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        tea_garden_id = request.data.get('tea_garden_id')
         creche_id = request.data.get('creche_id')
         
-        if not creche_id:
-            return Response({"error": "creche_id is required"}, status=400)
+        # tea_garden_id is mandatory
+        if not tea_garden_id:
+            return Response({"msg": "tea_garden_id is required"}, status=400)
         
         try:
-            creche = Creche.objects.get(id=creche_id)
-        except Creche.DoesNotExist:
-            return Response({"error": "Creche not found"}, status=404)
+            tea_garden = TeaGarden.objects.get(id=tea_garden_id)
+        except TeaGarden.DoesNotExist:
+            return Response({"msg": "Tea garden not found"}, status=200)
         
-        children = Child.objects.filter(creche=creche).all()
+        # If both tea_garden_id and creche_id are provided
+        if creche_id:
+            try:
+                creches = Creche.objects.filter(id=creche_id, tea_garden=tea_garden)
+                if not creches.exists():
+                    return Response({"msg": "Creche not found under this tea garden"}, status=404)
+            except Creche.DoesNotExist:
+                return Response({"msg": "Creche not found"}, status=200)
+        else:
+            # Only tea_garden_id - get all creches under this tea garden
+            creches = Creche.objects.filter(tea_garden=tea_garden)
+        
+        # Order by most recently created first (newest first)
+        children = Child.objects.filter(creche__in=creches).select_related('creche').order_by('-created_at').all()
         
         children_data = []
         for child in children:
@@ -643,19 +818,32 @@ class ChildListAPI(APIView):
             
             children_data.append({
                 'id': child.id,
+                'creche_id': child.creche.id,
+                'creche_name': child.creche.creche_name,
                 'name': child.name,
                 'age_years': child.age_years,
                 'gender': child.gender,
+                'height': child.height_cm,
+                'weight' : child.weight_kg,
+                'guardian_name' : child.guardian_name,
+                'contact_person_name': child.contact_person_name,
+                'contact_phone': child.contact_phone,
+                'address': child.address,
+                'enrollment_date': child.created_at,
                 'photo_url': photo_url,
                 'gallery_urls': gallery_urls,
                 'created_at': child.created_at
             })
         
         return Response({
-            'creche_id': creche.id,
-            'creche_name': creche.creche_name,
-            'children_count': len(children_data),
-            'children': children_data
+            'status_code': 200,
+            'message': 'success',
+            'data': {
+                'tea_garden_id': tea_garden.id,
+                'tea_garden_name': tea_garden.tea_garden_name,
+                'children_count': len(children_data),
+                'children': children_data
+            }
         }, status=200)
 
 
@@ -695,3 +883,5 @@ class CrecheCreateAPI(APIView):
                 "geo_radius_meters": creche.geo_radius_meters
             }
         }, status=201)
+
+

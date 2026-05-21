@@ -18,8 +18,289 @@ from creches.models import Child, ChildAttendance, ChildAttendanceDetail, Creche
 
 EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance"
 
-
 class MarkAttendanceAPI(APIView):
+       
+    permission_classes = [AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+
+    @transaction.atomic
+    def post(self, request):
+        # --- Extract request parameters ---
+        # Try multiple possible file field names (file, photo, image, attendance_photo)
+        group_photo = (
+            request.FILES.get('file') or
+            request.FILES.get('photo') or
+            request.FILES.get('image') or
+            request.FILES.get('attendance_photo')
+        )
+        creche_id = request.data.get('creche_id') or request.POST.get('creche_id')
+        # Accept both 'marked_by_id' and 'mark_by_id' for backward compatibility
+        marked_by_id = (
+            request.data.get('marked_by_id') or
+            request.POST.get('marked_by_id') or
+            request.data.get('mark_by_id') or
+            request.POST.get('mark_by_id')
+        )
+
+        # --- Debug logging ---
+        print(f"[MarkAttendanceAPI] FILES keys: {list(request.FILES.keys())}")
+        print(f"[MarkAttendanceAPI] DATA keys: {list(request.data.keys())}")
+        print(f"[MarkAttendanceAPI] POST keys: {list(request.POST.keys())}")
+        print(f"[MarkAttendanceAPI] group_photo: {group_photo}")
+        print(f"[MarkAttendanceAPI] creche_id: {creche_id}")
+        print(f"[MarkAttendanceAPI] marked_by_id: {marked_by_id}")
+        print(f"[MarkAttendanceAPI] content_type: {request.content_type}")
+
+        # --- Validation ---
+        if not group_photo:
+            return Response(
+                {
+                    "message": "file (group photo) is required",
+                    "debug": {
+                        "files_keys": list(request.FILES.keys()),
+                        "data_keys": list(request.data.keys()),
+                        "post_keys": list(request.POST.keys()),
+                        "content_type": request.content_type
+                    }
+                },
+                status=status.HTTP_200_OK
+            )
+
+        if not creche_id:
+            return Response(
+                {"message": "creche_id is required"},
+                status=status.HTTP_200_OK
+            )
+
+        if not marked_by_id:
+            return Response(
+                {"message": "marked_by_id (CrecheAttendant ID) is required"},
+                status=status.HTTP_200_OK
+            )
+
+        try:
+            creche = Creche.objects.get(id=creche_id)
+        except Creche.DoesNotExist:
+            return Response(
+                {"message": "Creche not found"},
+                status=status.HTTP_200_OK
+            )
+
+        try:
+            marked_by = CrecheAttendant.objects.get(id=marked_by_id)
+        except CrecheAttendant.DoesNotExist:
+            return Response(
+                {"message": "Attendant (marked_by_id) not found"},
+                status=status.HTTP_200_OK
+            )
+
+        # --- Forward the group photo to external face recognition API ---
+        try:
+            files = {'file': (group_photo.name, group_photo.read(), group_photo.content_type)}
+            payload = {
+                'creche_id': creche_id,
+                'marked_by_id': marked_by_id,   # external API expects 'marked_by_id'
+            }
+            
+            ext_response = requests.post(
+                EXTERNAL_ATTENDANCE_API_URL,
+                files=files,
+                data=payload,
+                timeout=60
+            )
+
+            if ext_response.status_code != 200:
+                return Response(
+                    {
+                        "message": "External face recognition API message",
+                        "external_status": ext_response.status_code,
+                        "external_response": ext_response.text
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            ext_data = ext_response.json()
+
+        except requests.exceptions.Timeout:
+            return Response(
+                {"message": "External face recognition API timed out"},
+                status=status.HTTP_200_OK
+            )
+        except requests.exceptions.Connectionmessage as e:
+            return Response(
+                {"message": f"Cannot connect to external face recognition API: {str(e)}"},
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {"message": f"message calling external API: {str(e)}"},
+                status=status.HTTP_200_OK
+            )
+
+        # --- Parse external API response ---
+        total_faces = ext_data.get('total_faces', 0)
+        present_ids = ext_data.get('present', [])       # list of child IDs recognized as present
+        already_present_ids = ext_data.get('already_present', [])  # list of child IDs already marked
+        unknown_faces = ext_data.get('unknown_faces', 0)
+        spoof_faces = ext_data.get('spoof_faces', 0)
+        annotated_image_base64 = ext_data.get('annotated_image_base64', '')
+        child_attendance_id_ext = ext_data.get('child_attendance_id')      # external attendance ID
+        attendance_photo_path = ext_data.get('attendance_photo', '')       # external photo path
+
+        # --- Determine attendance date (use today if not provided by external API) ---
+        today = date.today()
+
+        # --- Build remarks from face recognition results ---
+        remarks = f"Total faces detected: {total_faces}, Unknown: {unknown_faces}, Spoof: {spoof_faces}"
+        if attendance_photo_path:
+            remarks += f" | External photo: {attendance_photo_path}"
+
+        # --- Create or get local ChildAttendance record ---
+        attendance, created = ChildAttendance.objects.get_or_create(
+            creche=creche,
+            attendance_date=today,
+            attendance_mode='GROUP',
+            defaults={
+                'marked_by': marked_by,
+                'remarks': remarks,
+            }
+        )
+
+        # --- Save the uploaded group photo to attendance_photo field ---
+        # Reset file pointer to beginning since we already read it for the external API
+        group_photo.seek(0)
+        attendance.attendance_photo.save(
+            group_photo.name,
+            group_photo,
+            save=False
+        )
+
+        # --- Update remarks if record already existed ---
+        if not created:
+            attendance.remarks = remarks
+        attendance.save(update_fields=['attendance_photo', 'remarks'])
+
+        # --- Combine all child IDs that are present (newly detected + already present) ---
+        # Handle case where API might return dicts or IDs
+        def extract_id(item):
+            if isinstance(item, dict):
+                return item.get('id', item.get('child_id', item))
+            return item
+        
+        present_ids_clean = [extract_id(item) for item in present_ids]
+        already_present_ids_clean = [extract_id(item) for item in already_present_ids]
+        
+        # Deduplicate using dict to preserve order
+        seen = {}
+        for child_id in present_ids_clean + already_present_ids_clean:
+            if child_id not in seen:
+                seen[child_id] = True
+        all_present_ids = list(seen.keys())
+
+        # --- Get all active children in this creche (optimized query) ---
+        all_children_data = Child.objects.filter(creche=creche, is_active=True).values('id', 'name')
+        child_name_map = {child['id']: child['name'] for child in all_children_data}
+        all_child_ids = set(child_name_map.keys())
+        present_set = set(all_present_ids)
+
+        # --- Prepare attendance details for batch operation ---
+        present_count = 0
+        absent_count = 0
+        present_children = []
+        absent_children = []
+        already_present_children = []
+
+        # Get existing attendance details in one query
+        existing_details = {
+            d.child_id: d 
+            for d in ChildAttendanceDetail.objects.filter(child_attendance=attendance)
+        }
+
+        details_to_create = []
+        details_to_update = []
+
+        for child_id, child_name in child_name_map.items():
+            if child_id in present_set:
+                # Child is present
+                status_val = 'PRESENT'
+                present_count += 1
+                if child_id in already_present_ids_clean:
+                    already_present_children.append({
+                        'child_id': child_id,
+                        'child_name': child_name
+                    })
+                else:
+                    present_children.append({
+                        'child_id': child_id,
+                        'child_name': child_name
+                    })
+            else:
+                # Child is absent
+                status_val = 'ABSENT'
+                absent_count += 1
+                absent_children.append({
+                    'child_id': child_id,
+                    'child_name': child_name
+                })
+
+            # Prepare for batch operation
+            if child_id in existing_details:
+                detail = existing_details[child_id]
+                detail.attendance_status = status_val
+                details_to_update.append(detail)
+            else:
+                details_to_create.append(
+                    ChildAttendanceDetail(
+                        child_attendance=attendance,
+                        child_id=child_id,
+                        attendance_status=status_val
+                    )
+                )
+
+        # Batch create and update (much faster than loop with update_or_create)
+        if details_to_create:
+            ChildAttendanceDetail.objects.bulk_create(details_to_create)
+        if details_to_update:
+            ChildAttendanceDetail.objects.bulk_update(details_to_update, ['attendance_status'])
+
+        # --- Build response ---
+        return Response({
+            "status_code": 200,
+            "message": "success",
+            "data": {
+                "attendance_id": attendance.id,
+                "creche_id": creche.id,
+                "creche_name": creche.creche_name,
+                "attendance_date": today,
+                "attendance_mode": "GROUP",
+
+                # Face recognition summary
+                "total_faces_detected": total_faces,
+                "total_faces_recognized": len(all_present_ids),
+                "unknown_faces": unknown_faces,
+                "spoof_faces": spoof_faces,
+            
+                # Children breakdown
+                "total_children": len(child_name_map),
+                "present_count": present_count,
+                "absent_count": absent_count,
+                "present_children": present_children,
+                "already_present_children": already_present_children,
+                "absent_children": absent_children,
+
+                # External API reference
+                "external_attendance_id": child_attendance_id_ext,
+                "attendance_photo": attendance_photo_path,
+                "annotated_image_base64": annotated_image_base64,
+                # Photo URL
+                "attendance_photo_url": request.build_absolute_uri(attendance.attendance_photo.url) if attendance.attendance_photo else None,
+                "external_photo_path": attendance_photo_path,
+            }
+        }, status=status.HTTP_200_OK)
+
+
+
+class MarkAttendanceAPI_old(APIView):
    
     permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser]
@@ -95,168 +376,14 @@ class MarkAttendanceAPI(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # --- Forward the group photo to external face recognition API ---
-        try:
-            files = {'file': (group_photo.name, group_photo.read(), group_photo.content_type)}
-            payload = {
-                'creche_id': creche_id,
-                'marked_by_id': marked_by_id,   # external API expects 'marked_by_id'
-            }
-            
-            ext_response = requests.post(
-                EXTERNAL_ATTENDANCE_API_URL,
-                files=files,
-                data=payload,
-                timeout=60
-            )
-
-            if ext_response.status_code != 200:
-                return Response(
-                    {
-                        "error": "External face recognition API error",
-                        "external_status": ext_response.status_code,
-                        "external_response": ext_response.text
-                    },
-                    status=status.HTTP_502_BAD_GATEWAY
-                )
-
-            ext_data = ext_response.json()
-
-        except requests.exceptions.Timeout:
-            return Response(
-                {"error": "External face recognition API timed out"},
-                status=status.HTTP_504_GATEWAY_TIMEOUT
-            )
-        except requests.exceptions.ConnectionError as e:
-            return Response(
-                {"error": f"Cannot connect to external face recognition API: {str(e)}"},
-                status=status.HTTP_502_BAD_GATEWAY
-            )
-        except Exception as e:
-            return Response(
-                {"error": f"Error calling external API: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-        # --- Parse external API response ---
-        total_faces = ext_data.get('total_faces', 0)
-        present_ids = ext_data.get('present', [])       # list of child IDs recognized as present
-        already_present_ids = ext_data.get('already_present', [])  # list of child IDs already marked
-        unknown_faces = ext_data.get('unknown_faces', 0)
-        spoof_faces = ext_data.get('spoof_faces', 0)
-        annotated_image_base64 = ext_data.get('annotated_image_base64', '')
-        child_attendance_id_ext = ext_data.get('child_attendance_id')      # external attendance ID
-        attendance_photo_path = ext_data.get('attendance_photo', '')       # external photo path
-
-        # --- Determine attendance date (use today if not provided by external API) ---
-        today = date.today()
-
-        # --- Build remarks from face recognition results ---
-        remarks = f"Total faces detected: {total_faces}, Unknown: {unknown_faces}, Spoof: {spoof_faces}"
-        if attendance_photo_path:
-            remarks += f" | External photo: {attendance_photo_path}"
-
-        # --- Create or get local ChildAttendance record ---
-        attendance, created = ChildAttendance.objects.get_or_create(
-            creche=creche,
-            attendance_date=today,
-            attendance_mode='GROUP',
-            defaults={
-                'marked_by': marked_by,
-                'remarks': remarks,
-            }
-        )
-
-        # --- Save the uploaded group photo to attendance_photo field ---
-        # Reset file pointer to beginning since we already read it for the external API
-        group_photo.seek(0)
-        attendance.attendance_photo.save(
-            group_photo.name,
-            group_photo,
-            save=False
-        )
-
-        # --- Update remarks if record already existed ---
-        if not created:
-            attendance.remarks = remarks
-        attendance.save(update_fields=['attendance_photo', 'remarks'])
-
-        # --- Combine all child IDs that are present (newly detected + already present) ---
-        all_present_ids = list(set(present_ids + already_present_ids))
-
-        # --- Get all active children in this creche ---
-        all_children = Child.objects.filter(creche=creche, is_active=True)
-        all_child_ids = set(all_children.values_list('id', flat=True))
-        present_set = set(all_present_ids)
-
-        # --- Upsert attendance details ---
-        present_count = 0
-        absent_count = 0
-        present_children = []
-        absent_children = []
-        already_present_children = []
-
-        for child in all_children:
-            if child.id in present_set:
-                # Child is present
-                status_val = 'PRESENT'
-                present_count += 1
-                if child.id in already_present_ids:
-                    already_present_children.append({
-                        'child_id': child.id,
-                        'child_name': child.name
-                    })
-                else:
-                    present_children.append({
-                        'child_id': child.id,
-                        'child_name': child.name
-                    })
-            else:
-                # Child is absent
-                status_val = 'ABSENT'
-                absent_count += 1
-                absent_children.append({
-                    'child_id': child.id,
-                    'child_name': child.name
-                })
-
-            ChildAttendanceDetail.objects.update_or_create(
-                child_attendance=attendance,
-                child=child,
-                defaults={'attendance_status': status_val}
-            )
-
-        # --- Build response ---
+        
+        
         return Response({
-            "message": "Attendance processed successfully",
-            "attendance_id": attendance.id,
-            "creche_id": creche.id,
-            "creche_name": creche.creche_name,
-            "attendance_date": today,
-            "attendance_mode": "GROUP",
-
-            # Face recognition summary
-            "total_faces_detected": total_faces,
-            "total_faces_recognized": len(all_present_ids),
-            "unknown_faces": unknown_faces,
-            "spoof_faces": spoof_faces,
-
-            # Children breakdown
-            "total_children": all_children.count(),
-            "present_count": present_count,
-            "absent_count": absent_count,
-            "present_children": present_children,
-            "already_present_children": already_present_children,
-            "absent_children": absent_children,
-
-            # External API reference
-            "external_attendance_id": child_attendance_id_ext,
-            "attendance_photo": attendance_photo_path,
-            "annotated_image_base64": annotated_image_base64,
-            # Photo URL
-            "attendance_photo_url": request.build_absolute_uri(attendance.attendance_photo.url) if attendance.attendance_photo else None,
-            "external_photo_path": attendance_photo_path,
+            "status_code": 200,
+            "message": "success",
+         
         }, status=status.HTTP_200_OK)
+        
 
 
 class GetAttendanceByDateAPI(APIView):

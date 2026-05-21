@@ -162,6 +162,13 @@ class Medicine(models.Model):
 # Patient Treatment
 # -----------------------------
 class PatientTreatment(models.Model):
+    STATUS_CHOICES = [
+        (0, 'Pending'),
+        (1, 'In Progress'),
+        (2, 'Completed'),
+        (3, 'Cancelled'),
+    ]
+
     health_center = models.ForeignKey(HealthCenter, on_delete=models.CASCADE, related_name='treatments')
     nurse = models.ForeignKey(Nurse, on_delete=models.SET_NULL, null=True, blank=True)
 
@@ -170,6 +177,8 @@ class PatientTreatment(models.Model):
     contact_number = models.CharField(max_length=20, null=True, blank=True)
 
     prescription_image = models.ImageField(upload_to='prescriptions/', null=True, blank=True)
+    image = models.ImageField(upload_to='treatments/', null=True, blank=True)
+    status = models.IntegerField(choices=STATUS_CHOICES, default=0)
 
     treatment_date = models.DateTimeField(auto_now_add=True)
 

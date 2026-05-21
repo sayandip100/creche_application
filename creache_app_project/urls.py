@@ -19,13 +19,15 @@ from django.conf.urls.static import static
 from django.urls import path
 
 from creache_app_project import settings
-from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI 
+from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI, MobileLoginAPI
 from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI
 from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI
+from healthcenter.api.patient import AddPatientAPI, PatientListAPI, PatientDetailAPI
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('login/', LoginAPI.as_view(), name='login'),
+    path('mobile-login/', MobileLoginAPI.as_view(), name='mobile-login'),
     path('getrefreshtoken/', GetRefreshTokenAPI.as_view(), name='get-refresh-token'),
     path('logout/', LogoutAPI.as_view(), name='logout'),
     path('register/', AttendantRegisterAPI.as_view(), name='attendant-register'),
@@ -48,6 +50,14 @@ urlpatterns = [
     path('attendance/by-date/', GetAttendanceByDateAPI.as_view(), name='attendance-by-date'),
     path('attendance/child-history/', ChildAttendanceHistoryAPI.as_view(), name='attendance-child-history'),
     path('attendance/date-range/', AttendanceByDateRangeAPI.as_view(), name='attendance-date-range'),
+
+    # Face matching API
+    #path('match-face/', MatchFaceAPI.as_view(), name='match-face'),
+
+    # Patient Treatment API
+    path('patient/add/', AddPatientAPI.as_view(), name='add-patient'),
+    path('patient/list/', PatientListAPI.as_view(), name='patient-list'),
+    path('patient/<int:patient_id>/', PatientDetailAPI.as_view(), name='patient-detail'),
 ]
 
 
