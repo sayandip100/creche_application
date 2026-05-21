@@ -21,7 +21,7 @@ from django.urls import path
 from creache_app_project import settings
 from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI, MobileLoginAPI
 from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI
-from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI
+from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI, DetectChildrenFromPhotoAPI
 from healthcenter.api.patient import AddPatientAPI, PatientListAPI, PatientDetailAPI
 
 urlpatterns = [
@@ -47,6 +47,7 @@ urlpatterns = [
 
     # Child Attendance API
     path('attendance/mark/', MarkAttendanceAPI.as_view(), name='attendance-mark'),
+    path('attendance/detect-children/', DetectChildrenFromPhotoAPI.as_view(), name='attendance-detect-children'),
     path('attendance/by-date/', GetAttendanceByDateAPI.as_view(), name='attendance-by-date'),
     path('attendance/child-history/', ChildAttendanceHistoryAPI.as_view(), name='attendance-child-history'),
     path('attendance/date-range/', AttendanceByDateRangeAPI.as_view(), name='attendance-date-range'),
