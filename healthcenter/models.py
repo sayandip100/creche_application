@@ -82,6 +82,75 @@ class Nurse(models.Model):
 
 
 # -----------------------------
+# Nurse Photo
+# -----------------------------
+class NursePhoto(models.Model):
+    nurse = models.ForeignKey(Nurse, on_delete=models.CASCADE, related_name='photos')
+    photo = models.ImageField(upload_to='nurses/photos/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Nurse Photo'
+        verbose_name_plural = 'Nurse Photos'
+
+    def __str__(self):
+        return f"{self.nurse.nurse_name} - Photo {self.id}"
+
+
+# -----------------------------
+# Nurse Photo Embedding
+# -----------------------------
+class NursePhotoEmbedding(models.Model):
+    nurse_photo = models.ForeignKey(NursePhoto, on_delete=models.CASCADE, related_name='embeddings')
+    nurse = models.ForeignKey(Nurse, on_delete=models.CASCADE, related_name='photo_embeddings')
+    embedding = models.BinaryField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Nurse Photo Embedding'
+        verbose_name_plural = 'Nurse Photo Embeddings'
+
+    def __str__(self):
+        return f"{self.nurse.nurse_name} - Embedding for Photo {self.nurse_photo.id}"
+
+
+# -----------------------------
+# Doctor Photo
+# -----------------------------
+class DoctorPhoto(models.Model):
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='photos')
+    photo = models.ImageField(upload_to='doctors/photos/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Doctor Photo'
+        verbose_name_plural = 'Doctor Photos'
+
+    def __str__(self):
+        return f"{self.doctor.name} - Photo {self.id}"
+
+
+# -----------------------------
+# Doctor Photo Embedding
+# -----------------------------
+class DoctorPhotoEmbedding(models.Model):
+    doctor_photo = models.ForeignKey(DoctorPhoto, on_delete=models.CASCADE, related_name='embeddings')
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='photo_embeddings')
+    embedding = models.BinaryField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Doctor Photo Embedding'
+        verbose_name_plural = 'Doctor Photo Embeddings'
+        unique_together = ('doctor',)
+
+    def __str__(self):
+        return f"{self.doctor.name} - Embedding for Photo {self.doctor_photo.id}"
+
+
+# -----------------------------
 # Doctor Attendance
 # -----------------------------
 class DoctorAttendance(models.Model):
@@ -114,6 +183,58 @@ class DoctorAttendance(models.Model):
 
     def __str__(self):
         return f"{self.doctor.user.username} - {self.attendance_date}"
+
+
+# -----------------------------
+# Doctor Check-In (Separate tracking table)
+# -----------------------------
+class DoctorCheckIn(models.Model):
+    STATUS_CHOICES = [
+        ('CHECKED_IN', 'Checked In'),
+        ('CHECKED_OUT', 'Checked Out'),
+    ]
+
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='check_ins')
+    health_center = models.ForeignKey(HealthCenter, on_delete=models.CASCADE, related_name='doctor_check_ins')
+
+    check_in_date = models.DateField()
+    check_in_time = models.DateTimeField()
+    check_in_photo = models.ImageField(upload_to='doctor_checkin_photos/', blank=True, null=True)
+    check_in_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_in_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_in_geo_verified = models.BooleanField(default=False)
+    
+    # Face verification
+    face_match_score = models.FloatField(default=0.0)
+    face_verified = models.BooleanField(default=False)
+
+    check_out_time = models.DateTimeField(null=True, blank=True)
+    check_out_photo = models.ImageField(upload_to='doctor_checkout_photos/', blank=True, null=True)
+    check_out_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_out_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_out_geo_verified = models.BooleanField(default=False)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CHECKED_IN')
+    duration_minutes = models.IntegerField(null=True, blank=True)
+    
+    # Additional tracking fields
+    attendance_date = models.DateField(null=True, blank=True)
+    nurse_present = models.BooleanField(default=False)
+    hygiene_maintained = models.BooleanField(default=False)
+    patients_visited_today = models.IntegerField(default=0)
+    
+    remarks = models.TextField(blank=True, null=True)
+    checkout_remarks = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-check_in_time']
+        verbose_name = 'Doctor Check-In'
+        verbose_name_plural = 'Doctor Check-Ins'
+
+    def __str__(self):
+        return f"{self.doctor.name} - {self.check_in_date} ({self.status})"
 
 
 # -----------------------------
@@ -171,6 +292,7 @@ class PatientTreatment(models.Model):
 
     health_center = models.ForeignKey(HealthCenter, on_delete=models.CASCADE, related_name='treatments')
     nurse = models.ForeignKey(Nurse, on_delete=models.SET_NULL, null=True, blank=True)
+    doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True, blank=True)
 
     patient_name = models.CharField(max_length=200)
     age = models.IntegerField(null=True, blank=True)
@@ -179,6 +301,12 @@ class PatientTreatment(models.Model):
     prescription_image = models.ImageField(upload_to='prescriptions/', null=True, blank=True)
     image = models.ImageField(upload_to='treatments/', null=True, blank=True)
     status = models.IntegerField(choices=STATUS_CHOICES, default=0)
+
+    # e-Prescription clinical fields
+    symptoms = models.TextField(null=True, blank=True, help_text="Patient symptoms")
+    diagnosis = models.TextField(null=True, blank=True, help_text="Diagnosis description")
+    doctor_remarks = models.TextField(null=True, blank=True, help_text="Doctor's remarks/notes")
+    followup_date = models.DateField(null=True, blank=True, help_text="Recommended follow-up date")
 
     treatment_date = models.DateTimeField(auto_now_add=True)
 

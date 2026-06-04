@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 
 # -----------------------------
 
-class LoginSerializer(serializers.Serializer):
+class LoginSerializer_old(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -24,6 +24,24 @@ class LoginSerializer(serializers.Serializer):
 
         attrs['user'] = user
         return attrs
+    
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        username = attrs.get('username')
+        password = attrs.get('password')
+
+        if username and password:
+            user = authenticate(username=username, password=password)
+            if not user:
+                raise serializers.ValidationError('Invalid credentials password or username is incorrect')
+        else:
+            raise serializers.ValidationError('Must provide username and password')
+
+        attrs['user'] = user
+        return attrs    
     
 User = get_user_model()
     

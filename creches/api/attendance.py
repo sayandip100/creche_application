@@ -16,7 +16,8 @@ from django.conf import settings
 from creches.models import Child, ChildAttendance, ChildAttendanceDetail, Creche, CrecheAttendant
 
 
-EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance"
+#EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance"
+EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance/child"
 
 class MarkAttendanceAPI(APIView):
        
@@ -483,6 +484,134 @@ class DetectChildrenFromPhotoAPI(APIView):
                 "unknown_faces": unknown_faces,
                 "spoof_faces": spoof_faces,
                 "children": children_response
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class MarkIndividualChildAttendanceAPI(APIView):
+    """
+    API endpoint to mark individual child attendance as PRESENT or ABSENT.
+    Required params: child_id (single ID or array of IDs)
+    Optional params: attendance_status (PRESENT/ABSENT), creche_id, marked_by_id
+    """
+    permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def post(self, request):
+        # --- Extract request parameters ---
+        child_id_param = request.data.get('child_id')
+        creche_id = request.data.get('creche_id')
+        attendance_status = request.data.get('attendance_status', 'PRESENT').upper()
+        marked_by_id = request.data.get('marked_by_id')
+
+        # --- Validation ---
+        if not child_id_param:
+            return Response({
+                "status_code": 400,
+                "message": "child_id is required (can be single ID or array of IDs)"
+            }, status=status.HTTP_200_OK)
+
+        if attendance_status not in ['PRESENT', 'ABSENT']:
+            return Response({
+                "status_code": 400,
+                "message": "attendance_status must be 'PRESENT' or 'ABSENT'"
+            }, status=status.HTTP_200_OK)
+
+        # --- Convert to list if single value ---
+        if isinstance(child_id_param, list):
+            child_ids = [int(cid) for cid in child_id_param if cid]
+        else:
+            child_ids = [int(child_id_param)]
+
+        if not child_ids:
+            return Response({
+                "status_code": 400,
+                "message": "No valid child IDs provided"
+            }, status=status.HTTP_200_OK)
+
+        # --- Get all children ---
+        children = Child.objects.filter(id__in=child_ids, is_active=True)
+        
+        if not children.exists():
+            return Response({
+                "status_code": 404,
+                "message": "No valid children found"
+            }, status=status.HTTP_200_OK)
+
+        # --- Get creche (from first child if not provided) ---
+        first_child = children.first()
+        creche = first_child.creche
+        if creche_id:
+            try:
+                creche = Creche.objects.get(id=creche_id)
+            except Creche.DoesNotExist:
+                return Response({
+                    "status_code": 404,
+                    "message": "Creche not found"
+                }, status=status.HTTP_200_OK)
+
+        # --- Get or create attendance record for today ---
+        today = date.today()
+        remarks = f"Individual attendance marked for {len(children)} children"
+        
+        marked_by = None
+        if marked_by_id:
+            try:
+                marked_by = CrecheAttendant.objects.get(id=marked_by_id)
+                remarks += f" by {marked_by.user.username}"
+            except CrecheAttendant.DoesNotExist:
+                pass
+
+        attendance, created = ChildAttendance.objects.get_or_create(
+            creche=creche,
+            attendance_date=today,
+            attendance_mode='INDIVIDUAL',
+            defaults={
+                'marked_by': marked_by,
+                'remarks': remarks,
+            }
+        )
+
+        # --- Create or update child attendance details in batch ---
+        marked_children = []
+        
+        for child in children:
+            detail, detail_created = ChildAttendanceDetail.objects.update_or_create(
+                child_attendance=attendance,
+                child_id=child.id,
+                defaults={'attendance_status': attendance_status}
+            )
+
+            # --- Get child photo ---
+            front_image_url = None
+            if child.photo:
+                front_image_url = request.build_absolute_uri(child.photo.url)
+            else:
+                child_photo = ChildPhoto.objects.filter(child=child).first()
+                if child_photo:
+                    front_image_url = request.build_absolute_uri(child_photo.photo.url)
+
+            marked_children.append({
+                "child_id": child.id,
+                "child_name": child.name,
+                "front_image": front_image_url or "",
+                "attendance_status": attendance_status,
+                "is_newly_created": detail_created
+            })
+
+        # --- Build response ---
+        return Response({
+            "status_code": 200,
+            "message": f"Attendance marked successfully for {len(marked_children)} children as {attendance_status}",
+            "data": {
+                "attendance_id": attendance.id,
+                "creche_id": creche.id,
+                "creche_name": creche.creche_name,
+                "attendance_date": today,
+                "attendance_status": attendance_status,
+                "attendance_mode": "INDIVIDUAL",
+                "total_marked": len(marked_children),
+                "children": marked_children
             }
         }, status=status.HTTP_200_OK)
 

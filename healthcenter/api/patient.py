@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.db import transaction
 
-from healthcenter.models import PatientTreatment, HealthCenter, Nurse
+from healthcenter.models import PatientTreatment, HealthCenter, Nurse, Doctor
 from healthcenter.serializers import AddPatientSerializer, PatientTreatmentSerializer
 
 
@@ -18,6 +18,7 @@ class AddPatientAPI(APIView):
     - contact_number (optional): Contact number
     - health_center_id (required): ID of the health center
     - nurse_id (optional): ID of the nurse
+    - doctor_id (optional): ID of the doctor
     - status (optional, default=1): Treatment status
     - remarks (optional): Additional remarks
     """
@@ -47,6 +48,7 @@ class AddPatientAPI(APIView):
             contact_number = validated_data.get('contact_number')
             health_center_id = validated_data.get('health_center_id')
             nurse_id = validated_data.get('nurse_id')
+            doctor_id = validated_data.get('doctor_id')
             patient_status = validated_data.get('status', 1)
             remarks = validated_data.get('remarks')
             
@@ -78,6 +80,21 @@ class AddPatientAPI(APIView):
                         status=status.HTTP_201_CREATED
                     )
             
+            # Get doctor if provided
+            doctor = None
+            if doctor_id:
+                try:
+                    doctor = Doctor.objects.get(id=doctor_id)
+                except Doctor.DoesNotExist:
+                    return Response(
+                        {
+                            "status_code": 404,
+                            "message": "Doctor not found",
+                            "data": {}
+                        },
+                        status=status.HTTP_201_CREATED
+                    )
+            
             # Create patient treatment record
             patient_treatment = PatientTreatment.objects.create(
                 patient_name=patient_name,
@@ -85,6 +102,7 @@ class AddPatientAPI(APIView):
                 contact_number=contact_number,
                 health_center=health_center,
                 nurse=nurse,
+                doctor=doctor,
                 status=patient_status,
                 remarks=remarks
             )
@@ -106,6 +124,8 @@ class AddPatientAPI(APIView):
                         "health_center_name": patient_treatment.health_center.name,
                         "nurse_id": patient_treatment.nurse.id if patient_treatment.nurse else None,
                         "nurse_name": patient_treatment.nurse.nurse_name if patient_treatment.nurse else None,
+                        "doctor_id": patient_treatment.doctor.id if patient_treatment.doctor else None,
+                        "doctor_name": patient_treatment.doctor.name if patient_treatment.doctor else None,
                         "status": patient_treatment.status,
                         "treatment_date": patient_treatment.treatment_date.isoformat() if patient_treatment.treatment_date else None,
                         "remarks": patient_treatment.remarks,
@@ -136,6 +156,7 @@ class PatientListAPI(APIView):
             # Get optional filter parameters from query params
             health_center_id = request.query_params.get('health_center_id')
             nurse_id = request.query_params.get('nurse_id')
+            doctor_id = request.query_params.get('doctor_id')
            
             # Build query
             queryset = PatientTreatment.objects.all()
@@ -145,6 +166,9 @@ class PatientListAPI(APIView):
             
             if nurse_id:
                 queryset = queryset.filter(nurse_id=nurse_id)
+
+            if doctor_id:
+                queryset = queryset.filter(doctor_id=doctor_id)
             
             # Order by most recent first
             queryset = queryset.order_by('-created_at')
@@ -174,21 +198,22 @@ class PatientListAPI(APIView):
 
     def post(self, request):
         """
-        POST endpoint to list patients filtered by health_center_id and/or nurse_id.
+        POST endpoint to list patients filtered by health_center_id, nurse_id, and/or doctor_id.
         
         Accepts JSON body:
         {
             "health_center_id": 2,
-            "nurse_id": 1
+            "nurse_id": 1,
+            "doctor_id": 3
         }
-        Both parameters are optional.
+        All parameters are optional.
         """
         try:
             # Get optional filter parameters from request body
             health_center_id = request.data.get('health_center_id')
             nurse_id = request.data.get('nurse_id')
+            doctor_id = request.data.get('doctor_id')
            
-            
             # Build query
             queryset = PatientTreatment.objects.all()
             
@@ -197,6 +222,9 @@ class PatientListAPI(APIView):
             
             if nurse_id:
                 queryset = queryset.filter(nurse_id=nurse_id)
+
+            if doctor_id:
+                queryset = queryset.filter(doctor_id=doctor_id)
             
             # Order by most recent first
             queryset = queryset.order_by('-created_at')
@@ -283,6 +311,19 @@ class PatientDetailAPI(APIView):
                         {
                             "status_code": 404,
                             "message": "Nurse not found",
+                            "data": {}
+                        },
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            
+            if 'doctor_id' in request.data and request.data.get('doctor_id'):
+                try:
+                    patient.doctor = Doctor.objects.get(id=request.data.get('doctor_id'))
+                except Doctor.DoesNotExist:
+                    return Response(
+                        {
+                            "status_code": 404,
+                            "message": "Doctor not found",
                             "data": {}
                         },
                         status=status.HTTP_404_NOT_FOUND

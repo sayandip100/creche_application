@@ -5,8 +5,8 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
-from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding, ChildGrowthMonitoring
-from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, MedicineStockTransaction, PatientTreatmentMedicine, WeeklyMedicineRequisition, WeeklyMedicineRequisitionDetail, DoctorAttendance, NurseAttendance
+from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding, ChildGrowthMonitoring, CrecheAttendantPhoto, CrecheAttendantPhotoEmbedding
+from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, MedicineStockTransaction, PatientTreatmentMedicine, WeeklyMedicineRequisition, WeeklyMedicineRequisitionDetail, DoctorAttendance, NurseAttendance, DoctorPhoto, DoctorPhotoEmbedding, NursePhoto, NursePhotoEmbedding
 from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer, ChildRegisterSerializer
 from django.contrib.auth import get_user_model
 
@@ -30,9 +30,29 @@ class LoginAPI(APIView):
         # -----------------------------
         # Validate user and generate JWT
         # -----------------------------
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        try:
+            serializer = LoginSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response({
+                    'status_code': 401,
+                    'message': 'Invalid credentials',
+                    'errors': serializer.errors
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            # Get user from validated data
+            if 'user' not in serializer.validated_data:
+                return Response({
+                    'status_code': 401,
+                    'message': 'Authentication failed',
+                    'errors': {'user': ['User not found']}
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            
+            user = serializer.validated_data['user']
+        except Exception as e:
+            return Response({
+                'status_code': 400,
+                'message': f'Login error: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         refresh = RefreshToken.for_user(user)
         
@@ -388,9 +408,29 @@ class MobileLoginAPI(APIView):
 
     def post(self, request):
         # Validate user and generate JWT
-        serializer = LoginSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        try:
+            serializer = LoginSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response({
+                    'status_code': 401,
+                    'message': 'Invalid credentials',
+                    'errors': serializer.errors
+                }, status=status.HTTP_200_OK)
+            
+            # Get user from validated data
+            if 'user' not in serializer.validated_data:
+                return Response({
+                    'status_code': 401,
+                    'message': 'Authentication failed',
+                    'errors': {'user': ['User not found']}
+                }, status=status.HTTP_200_OK)
+            
+            user = serializer.validated_data['user']
+        except Exception as e:
+            return Response({
+                'status_code': 400,
+                'message': f'Login error: {str(e)}'
+            }, status=status.HTTP_200_OK)
 
         # Generate refresh token (access token is derived from it)
         refresh = RefreshToken.for_user(user)
@@ -399,36 +439,33 @@ class MobileLoginAPI(APIView):
         # Get current login time
         login_time = timezone.now()
 
-        # Get name based on role
+        # Get user-specific objects based on role
         name = None
         attendant = None
         doctor = None
         nurse = None
-        staff = None
+        tea_garden_id = None
         
         if user.role in ['attendant', 'super_attendant']:
-            attendant = CrecheAttendant.objects.filter(user=user).first()
-            name = attendant.attendant_name if attendant else None
-        elif user.role == 'doctor':
-            doctor = Doctor.objects.filter(user=user).first()
-            name = doctor.name if doctor else None
-        elif user.role in ['nurse', 'head_nurse']:
-            nurse = Nurse.objects.filter(user=user).first()
-            name = nurse.nurse_name if nurse else None
-
-        # Get tea_garden_id based on role
-        tea_garden_id = None
-        if user.role in ['attendant', 'super_attendant']:
-            # For attendants, get tea_garden from associated creche
             attendant = CrecheAttendant.objects.filter(user=user).select_related('creche__tea_garden').first()
-            if attendant and attendant.creche:
-                tea_garden_id = attendant.creche.tea_garden.id
-        elif user.role in ['doctor', 'head_nurse', 'nurse']:
-            # For health staff, get tea_garden from associated health center
-            staff = Doctor.objects.filter(user=user).select_related('health_center__tea_garden').first() or \
-                    Nurse.objects.filter(user=user).select_related('health_center__tea_garden').first()
-            if staff and staff.health_center:
-                tea_garden_id = staff.health_center.tea_garden.id
+            if attendant:
+                name = attendant.attendant_name
+                if attendant.creche:
+                    tea_garden_id = attendant.creche.tea_garden.id
+                    
+        elif user.role == 'doctor':
+            doctor = Doctor.objects.filter(user=user).select_related('health_center__tea_garden').first()
+            if doctor:
+                name = doctor.name
+                if doctor.health_center:
+                    tea_garden_id = doctor.health_center.tea_garden.id
+                    
+        elif user.role in ['nurse', 'head_nurse']:
+            nurse = Nurse.objects.filter(user=user).select_related('health_center__tea_garden').first()
+            if nurse:
+                name = nurse.nurse_name
+                if nurse.health_center:
+                    tea_garden_id = nurse.health_center.tea_garden.id
 
         # Build mobile response
         user_data = {
@@ -439,8 +476,11 @@ class MobileLoginAPI(APIView):
             'name': name,
             'login_time': login_time.isoformat(),
             'tea_garden_id': tea_garden_id,
-            'creache_id' : attendant.creche.id if user.role in ['attendant', 'super_attendant'] and attendant and attendant.creche else None,
-            'health_center_id' : staff.health_center.id if user.role in ['doctor', 'head_nurse', 'nurse'] and staff and staff.health_center else None
+            'creache_id': attendant.creche.id if attendant and attendant.creche else None,
+            'health_center_id': doctor.health_center.id if doctor and doctor.health_center else (nurse.health_center.id if nurse and nurse.health_center else None),
+            'attendant_id': attendant.id if attendant else None,
+            'doctor_id': doctor.id if doctor else None,
+            'nurse_id': nurse.id if nurse else None,
         }
 
         return Response({
@@ -454,6 +494,9 @@ class MobileLoginAPI(APIView):
                 'user_data': user_data
             }
         }, status=status.HTTP_200_OK)
+        
+        
+        
 
 class AttendantRegisterAPI(APIView):
     permission_classes = [AllowAny]
@@ -481,38 +524,107 @@ class AttendantRegisterAPI(APIView):
                     tea_garden=tea_garden
                 )
                 
-                attendant = CrecheAttendant.objects.create(
-                    user=new_user,
-                    creche=creche,
-                    role=data['role'],
-                    attendant_name=data.get('attendant_name'),
-                    mobile_no=data.get('mobile_no'),
-                    address=data.get('address'),
-                    photo=data['photo']
-                )
-
-                encoding, error = get_face_encoding(attendant.photo.path)
-
-                if error:
-                    attendant.delete()
+                # Get photo from request
+                photo = data['photo']
+                
+                # Prepare file for embedding API
+                files = []
+                try:
+                    files.append(('photo', (photo.name, photo.read())))
+                except Exception as photo_error:
                     new_user.delete()
-                    return Response({"error": error}, status=400)
-
-                import pickle
-                attendant.face_encoding = pickle.dumps(encoding)
-                attendant.save()
-
-                return Response({
-                    "message": "Attendant registered successfully",
-                    "data": {
-                        "id": attendant.id,
-                        "username": new_user.username,
-                        "role": attendant.role,
-                        "tea_garden_id": tea_garden.id,
-                        "creche_id": creche.id,
-                        "photo_url": request.build_absolute_uri(attendant.photo.url)
-                    }
-                }, status=201)
+                    return Response({
+                        "status_code": 400,
+                        "message": "error",
+                        "error": f"Failed to read photo: {str(photo_error)}"
+                    }, status=400)
+                
+                # Call embedding API
+                embeddings_response = None
+                embeddings_list = []
+                
+                try:
+                    embedding_api_url = "http://45.64.107.97:5010/api/v1/photo-embedding"
+                    
+                    print(f"[DEBUG] Calling embedding API for attendant registration...")
+                    embedding_response = requests.post(
+                        embedding_api_url,
+                        files=files,
+                        timeout=30
+                    )
+                    
+                    print(f"[DEBUG] API Response Status: {embedding_response.status_code}")
+                    print(f"[DEBUG] API Response: {embedding_response.text}")
+                    
+                    if embedding_response.status_code != 200:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "Embedding generation failed",
+                            "error": f"API returned {embedding_response.status_code}",
+                            "details": embedding_response.text
+                        }, status=200)
+                    
+                    embeddings_response = embedding_response.json()
+                    embeddings_list = embeddings_response.get('embeddings', [])
+                    
+                    if len(embeddings_list) == 0:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "error",
+                            "error": "No embeddings generated from API"
+                        }, status=400)
+                    
+                    print(f"[DEBUG] Embeddings received: {len(embeddings_list)}")
+                    
+                    # ✅ Embeddings successful - Now create attendant
+                    attendant = CrecheAttendant.objects.create(
+                        user=new_user,
+                        creche=creche,
+                        role=data['role'],
+                        attendant_name=data.get('attendant_name'),
+                        mobile_no=data.get('mobile_no'),
+                        address=data.get('address'),
+                        photo=data['photo']
+                    )
+                    
+                    # Create CrecheAttendantPhoto record
+                    attendant_photo = CrecheAttendantPhoto.objects.create(
+                        attendant=attendant,
+                        photo=data['photo']
+                    )
+                    
+                    # Create CrecheAttendantPhotoEmbedding record with serialized embedding
+                    embedding_data = embeddings_list[0]  # First embedding (list of floats)
+                    # Serialize embedding as binary using numpy
+                    embedding_bytes = np.array(embedding_data, dtype=np.float32).tobytes()
+                    attendant_photo_embedding = CrecheAttendantPhotoEmbedding.objects.create(
+                        attendant_photo=attendant_photo,
+                        attendant=attendant,
+                        embedding=embedding_bytes
+                    )
+                    
+                    return Response({
+                        "message": "Attendant registered successfully",
+                        "data": {
+                            "id": attendant.id,
+                            "username": new_user.username,
+                            "role": attendant.role,
+                            "attendant_name": attendant.attendant_name,
+                            "mobile_no": attendant.mobile_no,
+                            "address": attendant.address,
+                            "tea_garden_id": tea_garden.id,
+                            "creche_id": creche.id,
+                            "photo_url": request.build_absolute_uri(attendant.photo.url),
+                            "attendant_photo_id": attendant_photo.id,
+                            "embedding_id": attendant_photo_embedding.id
+                        }
+                    }, status=201)
+                    
+                except Exception as e:
+                    new_user.delete()
+                    return Response({"error": str(e)}, status=500)
 
             # =============================
             # DOCTOR
@@ -525,38 +637,109 @@ class AttendantRegisterAPI(APIView):
                     tea_garden=tea_garden
                 )
 
-                doctor = Doctor.objects.create(
-                    user=new_user,
-                    health_center=health_center,
-                    name=data.get('doctor_name'),
-                    specialization=data.get('specialization'),
-                    qualification =data.get('qualification'),
-                    mobile_no=data.get('mobile_no'),
-                    photo=data['photo']
-                )
-
-                encoding, error = get_face_encoding(doctor.photo.path)
-
-                if error:
-                    doctor.delete()
+                # Get photo from request
+                photo = data['photo']
+                
+                # Prepare file for embedding API
+                files = []
+                try:
+                    files.append(('photo', (photo.name, photo.read())))
+                except Exception as photo_error:
                     new_user.delete()
-                    return Response({"error": error}, status=400)
-
-                import pickle
-                doctor.face_encoding = pickle.dumps(encoding)
-                doctor.save()
-
-                return Response({
-                    "message": "Doctor registered successfully",
-                    "data": {
-                        "id": doctor.id,
-                        "username": new_user.username,
-                        "role": "doctor",
-                        "tea_garden_id": tea_garden.id,
-                        "health_center_id": health_center.id,
-                        "photo_url": request.build_absolute_uri(doctor.photo.url)
-                    }
-                }, status=201)
+                    return Response({
+                        "status_code": 400,
+                        "message": "error",
+                        "error": f"Failed to read photo: {str(photo_error)}"
+                    }, status=400)
+                
+                # Call embedding API
+                embeddings_response = None
+                embeddings_list = []
+                
+                try:
+                    embedding_api_url = "http://45.64.107.97:5010/api/v1/photo-embedding"
+                    
+                    print(f"[DEBUG] Calling embedding API for doctor registration...")
+                    embedding_response = requests.post(
+                        embedding_api_url,
+                        files=files,
+                        timeout=30
+                    )
+                    
+                    print(f"[DEBUG] API Response Status: {embedding_response.status_code}")
+                    print(f"[DEBUG] API Response: {embedding_response.text}")
+                    
+                    if embedding_response.status_code != 200:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "Embedding generation failed",
+                            "error": f"API returned {embedding_response.status_code}",
+                            "details": embedding_response.text
+                        }, status=200)
+                    
+                    embeddings_response = embedding_response.json()
+                    embeddings_list = embeddings_response.get('embeddings', [])
+                    
+                    if len(embeddings_list) == 0:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "error",
+                            "error": "No embeddings generated from API"
+                        }, status=200)
+                    
+                    print(f"[DEBUG] Embeddings received: {len(embeddings_list)}")
+                    
+                    # ✅ Embeddings successful - Now create doctor
+                    doctor = Doctor.objects.create(
+                        user=new_user,
+                        health_center=health_center,
+                        name=data.get('doctor_name'),
+                        specialization=data.get('specialization'),
+                        qualification=data.get('qualification'),
+                        mobile_no=data.get('mobile_no'),
+                        photo=data['photo']
+                    )
+                    
+                    # Create DoctorPhoto record
+                    doctor_photo = DoctorPhoto.objects.create(
+                        doctor=doctor,
+                        photo=data['photo']
+                    )
+                    
+                    # Create DoctorPhotoEmbedding record with serialized embedding
+                    embedding_data = embeddings_list[0]  # First embedding (list of floats)
+                    # Serialize embedding as binary using numpy
+                    embedding_bytes = np.array(embedding_data, dtype=np.float32).tobytes()
+                    doctor_photo_embedding = DoctorPhotoEmbedding.objects.create(
+                        doctor_photo=doctor_photo,
+                        doctor=doctor,
+                        embedding=embedding_bytes
+                    )
+                    
+                    return Response({
+                        "status_code": 200,
+                        "message": "Doctor registered successfully",
+                        "data": {
+                            "id": doctor.id,
+                            "username": new_user.username,
+                            "role": "doctor",
+                            "name": doctor.name,
+                            "qualification": doctor.qualification,
+                            "specialization": doctor.specialization,
+                            "mobile_no": doctor.mobile_no,
+                            "tea_garden_id": tea_garden.id,
+                            "health_center_id": health_center.id,
+                            "photo_url": request.build_absolute_uri(doctor.photo.url),
+                            "doctor_photo_id": doctor_photo.id,
+                            "embedding_id": doctor_photo_embedding.id
+                        }
+                    }, status=201)
+                    
+                except Exception as e:
+                    new_user.delete()
+                    return Response({"error": str(e)}, status=500)
 
             # =============================
             # NURSE / HEAD NURSE
@@ -569,38 +752,107 @@ class AttendantRegisterAPI(APIView):
                     tea_garden=tea_garden
                 )
 
-                nurse = Nurse.objects.create(
-                    user=new_user,
-                    health_center=health_center,
-                    role=data['role'],  # ✅ important
-                    nurse_name=data.get('nurse_name'),
-                    mobile_no=data.get('mobile_no'),
-                    qualification =data.get('qualification'),
-                    photo=data['photo']
-                )
-
-                encoding, error = get_face_encoding(nurse.photo.path)
-
-                if error:
-                    nurse.delete()
+                # Get photo from request
+                photo = data['photo']
+                
+                # Prepare file for embedding API
+                files = []
+                try:
+                    files.append(('photo', (photo.name, photo.read())))
+                except Exception as photo_error:
                     new_user.delete()
-                    return Response({"error": error}, status=400)
-
-                import pickle
-                nurse.face_encoding = pickle.dumps(encoding)
-                nurse.save()
-
-                return Response({
-                    "message": "Nurse registered successfully",
-                    "data": {
-                        "id": nurse.id,
-                        "username": new_user.username,
-                        "role": nurse.role,
-                        "tea_garden_id": tea_garden.id,
-                        "health_center_id": health_center.id,
-                        "photo_url": request.build_absolute_uri(nurse.photo.url)
-                    }
-                }, status=201)
+                    return Response({
+                        "status_code": 400,
+                        "message": "error",
+                        "error": f"Failed to read photo: {str(photo_error)}"
+                    }, status=400)
+                
+                # Call embedding API
+                embeddings_response = None
+                embeddings_list = []
+                
+                try:
+                    embedding_api_url = "http://45.64.107.97:5010/api/v1/photo-embedding"
+                    
+                    print(f"[DEBUG] Calling embedding API for nurse registration...")
+                    embedding_response = requests.post(
+                        embedding_api_url,
+                        files=files,
+                        timeout=30
+                    )
+                    
+                    print(f"[DEBUG] API Response Status: {embedding_response.status_code}")
+                    print(f"[DEBUG] API Response: {embedding_response.text}")
+                    
+                    if embedding_response.status_code != 200:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "Embedding generation failed",
+                            "error": f"API returned {embedding_response.status_code}",
+                            "details": embedding_response.text
+                        }, status=200)
+                    
+                    embeddings_response = embedding_response.json()
+                    embeddings_list = embeddings_response.get('embeddings', [])
+                    
+                    if len(embeddings_list) == 0:
+                        new_user.delete()
+                        return Response({
+                            "status_code": 400,
+                            "message": "error",
+                            "error": "No embeddings generated from API"
+                        }, status=400)
+                    
+                    print(f"[DEBUG] Embeddings received: {len(embeddings_list)}")
+                    
+                    # ✅ Embeddings successful - Now create nurse
+                    nurse = Nurse.objects.create(
+                        user=new_user,
+                        health_center=health_center,
+                        role=data['role'],  # ✅ important
+                        nurse_name=data.get('nurse_name'),
+                        mobile_no=data.get('mobile_no'),
+                        qualification=data.get('qualification'),
+                        photo=data['photo']
+                    )
+                    
+                    # Create NursePhoto record
+                    nurse_photo = NursePhoto.objects.create(
+                        nurse=nurse,
+                        photo=data['photo']
+                    )
+                    
+                    # Create NursePhotoEmbedding record with serialized embedding
+                    embedding_data = embeddings_list[0]  # First embedding (list of floats)
+                    # Serialize embedding as binary using numpy
+                    embedding_bytes = np.array(embedding_data, dtype=np.float32).tobytes()
+                    nurse_photo_embedding = NursePhotoEmbedding.objects.create(
+                        nurse_photo=nurse_photo,
+                        nurse=nurse,
+                        embedding=embedding_bytes
+                    )
+                    
+                    return Response({
+                        "message": "Nurse registered successfully",
+                        "data": {
+                            "id": nurse.id,
+                            "username": new_user.username,
+                            "role": nurse.role,
+                            "nurse_name": nurse.nurse_name,
+                            "qualification": nurse.qualification,
+                            "mobile_no": nurse.mobile_no,
+                            "tea_garden_id": tea_garden.id,
+                            "health_center_id": health_center.id,
+                            "photo_url": request.build_absolute_uri(nurse.photo.url),
+                            "nurse_photo_id": nurse_photo.id,
+                            "embedding_id": nurse_photo_embedding.id
+                        }
+                    }, status=201)
+                    
+                except Exception as e:
+                    new_user.delete()
+                    return Response({"error": str(e)}, status=500)
 
         except Exception as e:
             new_user.delete()
@@ -644,7 +896,7 @@ class ChildRegisterAPI(APIView):
         embeddings_list = []
         
         try:
-            embedding_api_url = "http://45.64.107.97:5010/api/v1/childregister"
+            embedding_api_url = "http://45.64.107.97:5010/api/v1/photo-embedding"
             
             print(f"[DEBUG] Preparing to call embedding API: {embedding_api_url}")
             print(f"[DEBUG] Total photos to send: {len(files)}")

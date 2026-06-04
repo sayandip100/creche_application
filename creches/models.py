@@ -93,6 +93,40 @@ class CrecheAttendant(models.Model):
 
 
 # -----------------------------
+# Creche Attendant Photo
+# -----------------------------
+class CrecheAttendantPhoto(models.Model):
+    attendant = models.ForeignKey(CrecheAttendant, on_delete=models.CASCADE, related_name='photos')
+    photo = models.ImageField(upload_to='attendants/photos/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Creche Attendant Photo'
+        verbose_name_plural = 'Creche Attendant Photos'
+
+    def __str__(self):
+        return f"{self.attendant.attendant_name} - Photo {self.id}"
+
+
+# -----------------------------
+# Creche Attendant Photo Embedding
+# -----------------------------
+class CrecheAttendantPhotoEmbedding(models.Model):
+    attendant_photo = models.ForeignKey(CrecheAttendantPhoto, on_delete=models.CASCADE, related_name='embeddings')
+    attendant = models.ForeignKey(CrecheAttendant, on_delete=models.CASCADE, related_name='photo_embeddings')
+    embedding = models.BinaryField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Creche Attendant Photo Embedding'
+        verbose_name_plural = 'Creche Attendant Photo Embeddings'
+
+    def __str__(self):
+        return f"{self.attendant.attendant_name} - Embedding for Photo {self.attendant_photo.id}"
+
+
+# -----------------------------
 # Child
 # -----------------------------
 class Child(models.Model):
@@ -264,6 +298,31 @@ class FoodMonitoring(models.Model):
 
     def __str__(self):
         return f"{self.creche.creche_name} - {self.monitoring_date}"
+
+
+# -----------------------------
+# Food Record
+# -----------------------------
+class FoodRecord(models.Model):
+    """
+    Records food items added for a creche.
+    food_items stores an array of food items as JSON.
+    """
+    creche = models.ForeignKey(Creche, on_delete=models.CASCADE, related_name='food_records')
+    food_items = models.JSONField(help_text="Array of food items", default=list)
+    added_by = models.ForeignKey(CrecheAttendant, on_delete=models.SET_NULL, null=True, blank=True, related_name='food_records')
+    food_update_date = models.DateTimeField(auto_now_add=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-food_update_date']
+        verbose_name = 'Food Record'
+        verbose_name_plural = 'Food Records'
+
+    def __str__(self):
+        return f"{self.creche.creche_name} - {self.food_update_date.date()}"
 
 
 # -----------------------------

@@ -1,6 +1,8 @@
 from datetime import datetime
 from django.db import models
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
+import requests
 
 from healthcenter.models import (
     HealthCenter, Nurse, NurseAttendance, PatientTreatment, DoctorAttendance,
@@ -21,6 +23,9 @@ class ChildAttendanceReportAPI(APIView):
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
         
+        # Report format: 'datewise' or 'childwise' (default: datewise)
+        report_format = request.data.get('report_format', 'datewise')
+        
         # -----------------------------
         # VALIDATION (ALL REQUIRED)
         # -----------------------------
@@ -31,8 +36,8 @@ class ChildAttendanceReportAPI(APIView):
             )
 
         try:
-            start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
         except ValueError:
             return Response(
                 {"error": "Invalid date format. Use YYYY-MM-DD"},
@@ -53,70 +58,160 @@ class ChildAttendanceReportAPI(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # -----------------------------
-        # REPORT BUILD
-        # -----------------------------
-        children_data = []
-        total_present = 0
-        total_absent = 0
+        # Get all children in creche
+        all_children = creche.children.all()
+        
+        # Fetch all attendance records for date range
+        attendance_qs = ChildAttendanceDetail.objects.filter(
+            child__in=all_children,
+            child_attendance__creche=creche,
+            child_attendance__attendance_date__range=[start_date_obj, end_date_obj]
+        ).select_related('child', 'child_attendance')
 
-        for child in creche.children.all():
-
-            attendance_qs = ChildAttendanceDetail.objects.filter(
-                child=child,
-                child_attendance__creche=creche,
-                child_attendance__attendance_date__range=[start_date, end_date]
-            ).select_related('child_attendance')
-
-            attendance_list = []
-
-            for detail in attendance_qs.order_by('child_attendance__attendance_date'):
-                attendance_list.append({
-                    'attendance_date': detail.child_attendance.attendance_date,
-                    'status': detail.attendance_status
-                })
-
-                if detail.attendance_status == 'PRESENT':
-                    total_present += 1
-                else:
-                    total_absent += 1
-
-            children_data.append({
-                'child_id': child.id,
-                'name': child.name,
-                'age_years': child.age_years,
-                'gender': child.gender,
-                'attendance_records': attendance_list,
-                'total_days': len(attendance_list),
-                'present_days': sum(1 for a in attendance_list if a['status'] == 'PRESENT'),
-                'absent_days': sum(1 for a in attendance_list if a['status'] == 'ABSENT'),
-            })
-
-        total_records = total_present + total_absent
+        # Calculate totals
+        total_records = attendance_qs.count()
+        total_present = attendance_qs.filter(attendance_status='PRESENT').count()
+        total_absent = total_records - total_present
 
         attendance_percentage = (
             (total_present / total_records) * 100
             if total_records > 0 else 0
         )
 
-        # -----------------------------
-        # FINAL RESPONSE
-        # -----------------------------
-        return Response({
-            "tea_garden_id": tea_garden_id,
-            "creche_id": creche.id,
-            "creche_name": creche.creche_name,
+        # ============================================
+        # DATEWISE REPORT FORMAT
+        # ============================================
+        if report_format == 'datewise':
+            # Group by date
+            date_dict = {}
+            
+            for detail in attendance_qs.order_by('child_attendance__attendance_date', 'child__name'):
+                att_date = detail.child_attendance.attendance_date
+                
+                if att_date not in date_dict:
+                    date_dict[att_date] = {
+                        'date': str(att_date),
+                        'day': att_date.strftime('%A'),
+                        'present_children': [],
+                        'absent_children': [],
+                        'total_present': 0,
+                        'total_absent': 0,
+                        'total_strength': 0
+                    }
+                
+                child_data = {
+                    'child_id': detail.child.id,
+                    'name': detail.child.name,
+                    'age_years': detail.child.age_years,
+                    'gender': detail.child.gender,
+                    'roll_number': getattr(detail.child, 'roll_number', None)
+                }
+                
+                if detail.attendance_status == 'PRESENT':
+                    date_dict[att_date]['present_children'].append(child_data)
+                    date_dict[att_date]['total_present'] += 1
+                else:
+                    date_dict[att_date]['absent_children'].append(child_data)
+                    date_dict[att_date]['total_absent'] += 1
+                
+                date_dict[att_date]['total_strength'] = (
+                    date_dict[att_date]['total_present'] + date_dict[att_date]['total_absent']
+                )
+            
+            # Convert to sorted list
+            datewise_data = []
+            for date_key in sorted(date_dict.keys()):
+                date_entry = date_dict[date_key]
+                # Calculate attendance percentage for the day
+                day_total = date_entry['total_strength']
+                day_percentage = (
+                    (date_entry['total_present'] / day_total) * 100
+                    if day_total > 0 else 0
+                )
+                date_entry['attendance_percentage'] = round(day_percentage, 2)
+                datewise_data.append(date_entry)
+            
+            return Response({
+                "status_code": 200,
+                "message": "success",
+                "data": {
+                    "tea_garden_id": tea_garden_id,
+                    "creche_id": creche.id,
+                    "creche_name": creche.creche_name,
+                    "report_format": "datewise",
+                    "period": {
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "total_days": len(datewise_data)
+                    },
+                    "summary": {
+                        "total_records": total_records,
+                        "total_present": total_present,
+                        "total_absent": total_absent,
+                        "attendance_percentage": round(attendance_percentage, 2)
+                    },
+                    "attendance_by_date": datewise_data
+                }
+            }, status=status.HTTP_200_OK)
+        
+        # ============================================
+        # CHILDWISE REPORT FORMAT (Original)
+        # ============================================
+        else:
+            children_data = []
 
-            "summary": {
-                "total_records": total_records,
-                "total_present": total_present,
-                "total_absent": total_absent,
-                "attendance_percentage": round(attendance_percentage, 2)
-            },
+            for child in all_children:
+                attendance_qs_child = ChildAttendanceDetail.objects.filter(
+                    child=child,
+                    child_attendance__creche=creche,
+                    child_attendance__attendance_date__range=[start_date_obj, end_date_obj]
+                ).select_related('child_attendance')
 
-            "children": children_data
+                attendance_list = []
 
-        }, status=status.HTTP_200_OK)    
+                for detail in attendance_qs_child.order_by('child_attendance__attendance_date'):
+                    attendance_list.append({
+                        'attendance_date': str(detail.child_attendance.attendance_date),
+                        'day': detail.child_attendance.attendance_date.strftime('%A'),
+                        'status': detail.attendance_status
+                    })
+
+                children_data.append({
+                    'child_id': child.id,
+                    'name': child.name,
+                    'age_years': child.age_years,
+                    'gender': child.gender,
+                    'attendance_records': attendance_list,
+                    'total_days': len(attendance_list),
+                    'present_days': sum(1 for a in attendance_list if a['status'] == 'PRESENT'),
+                    'absent_days': sum(1 for a in attendance_list if a['status'] == 'ABSENT'),
+                })
+
+            return Response({
+                "status_code": 200,
+                "message": "success",
+                "data": {
+                    "tea_garden_id": tea_garden_id,
+                    "creche_id": creche.id,
+                    "creche_name": creche.creche_name,
+                    "report_format": "childwise",
+                    "period": {
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "total_days": len(set(
+                            att.child_attendance.attendance_date 
+                            for att in attendance_qs
+                        ))
+                    },
+                    "summary": {
+                        "total_records": total_records,
+                        "total_present": total_present,
+                        "total_absent": total_absent,
+                        "attendance_percentage": round(attendance_percentage, 2)
+                    },
+                    "children": children_data
+                }
+            }, status=status.HTTP_200_OK)    
     
 class FoodMonitoringReportAPI(APIView):
     
@@ -161,13 +256,14 @@ class FoodMonitoringReportAPI(APIView):
         creche_id = request.data.get('creche_id')
         start_date = request.data.get('start_date')
         end_date = request.data.get('end_date')
+        entered_by_id = request.data.get('entered_by_id')
 
         # -----------------------------
         # VALIDATION
         # -----------------------------
-        if not all([tea_garden_id, creche_id, start_date, end_date]):
+        if not all([tea_garden_id, creche_id, start_date, end_date, entered_by_id]):
             return Response(
-                {"error": "tea_garden_id, creche_id, start_date, end_date are required"},
+                {"error": "tea_garden_id, creche_id, start_date, end_date, entered_by_id are required"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -197,12 +293,57 @@ class FoodMonitoringReportAPI(APIView):
         # -----------------------------
         # FETCH FOOD DATA
         # -----------------------------
-        food_qs = FoodMonitoring.objects.filter(
-            creche=creche,
-            monitoring_date__range=[start_date, end_date]
-        ).order_by('monitoring_date')
+        filters = {
+            'creche': creche,
+            'monitoring_date__range': [start_date, end_date]
+        }
+
+        # Optional filter by entered_by (CrecheAttendant ID or user ID)
+        if entered_by_id:
+            try:
+                # Try as CrecheAttendant ID first
+                entered_by = CrecheAttendant.objects.get(id=entered_by_id)
+                filters['entered_by'] = entered_by
+            except CrecheAttendant.DoesNotExist:
+                # Try as user ID
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                try:
+                    user = User.objects.get(id=entered_by_id)
+                    attendant = CrecheAttendant.objects.filter(
+                        user=user, creche=creche
+                    ).first()
+                    if attendant:
+                        filters['entered_by'] = attendant
+                except User.DoesNotExist:
+                    pass
+
+        food_qs = FoodMonitoring.objects.filter(**filters).order_by('monitoring_date')
 
         total_meals = food_qs.count()
+
+        # -----------------------------
+        # NO DATA CHECK
+        # -----------------------------
+        if total_meals == 0:
+            return Response({
+                "status_code": 200,
+                "message": "No food monitoring data found for this period",
+                "data": {
+                    "creche": {
+                        "id": creche.id,
+                        "name": creche.creche_name,
+                        "tea_garden": creche.tea_garden.tea_garden_name
+                    },
+                    "period": {
+                        "start_date": str(start_date),
+                        "end_date": str(end_date),
+                        "total_meals": 0
+                    },
+                    "nutrition": None,
+                    "records": []
+                }
+            }, status=status.HTTP_200_OK)
 
         total_calories = 0
         total_protein = 0
@@ -210,7 +351,6 @@ class FoodMonitoringReportAPI(APIView):
         total_fiber = 0
 
         food_records = []
-        chart_data = []
 
         # -----------------------------
         # LOOP DATA
@@ -224,22 +364,13 @@ class FoodMonitoringReportAPI(APIView):
 
             # Raw records
             food_records.append({
-                "monitoring_date": fm.monitoring_date,
+                "monitoring_date": str(fm.monitoring_date),
                 "meal_type": fm.meal_type,
                 "food_description": fm.food_description,
-                "estimated_calories": calories,
-                "estimated_protein_g": protein,
-                "estimated_carbs_g": carbs,
-                "estimated_fibre_g": fiber,
-            })
-
-            # Chart data
-            chart_data.append({
-                "date": str(fm.monitoring_date),
                 "calories": calories,
-                "protein": protein,
-                "carbs": carbs,
-                "fiber": fiber
+                "protein_g": protein,
+                "carbs_g": carbs,
+                "fibre_g": fiber,
             })
 
             # Totals
@@ -266,23 +397,31 @@ class FoodMonitoringReportAPI(APIView):
         # RESPONSE
         # -----------------------------
         return Response({
-            "creche_id": creche.id,
-            "creche_name": creche.creche_name,
-            "tea_garden": creche.tea_garden.tea_garden_name,
-
-            "total_meals_logged": total_meals,
-
-            "average_calories": round(avg_calories, 2),
-            "average_protein_g": round(avg_protein, 2),
-            "average_carbs_g": round(avg_carbs, 2),
-            "average_fibre_g": round(avg_fiber, 2),
-
-            "nutrition_grade": nutrition_grade,
-            "insights": insights,
-
-            "chart_data": chart_data,
-            "food_records": food_records
-
+            "status_code": 200,
+            "message": "success",
+            "data": {
+                "creche": {
+                    "id": creche.id,
+                    "name": creche.creche_name,
+                    "tea_garden": creche.tea_garden.tea_garden_name
+                },
+                "period": {
+                    "start_date": str(start_date),
+                    "end_date": str(end_date),
+                    "total_meals": total_meals
+                },
+                "nutrition": {
+                    "grade": nutrition_grade,
+                    "average": {
+                        "calories": round(avg_calories, 2),
+                        "protein_g": round(avg_protein, 2),
+                        "carbs_g": round(avg_carbs, 2),
+                        "fibre_g": round(avg_fiber, 2)
+                    },
+                    "insights": insights
+                },
+                "records": food_records
+            }
         }, status=status.HTTP_200_OK)
     
 class AttendantAttendanceReportAPI(APIView):
@@ -374,7 +513,7 @@ class AttendantAttendanceReportAPI(APIView):
         
 class Teagardenlist(APIView):
     
-    permission_classes = [IsAuthenticated]
+    #permission_classes = [AllowAny]
     def get(self, request):
         tea_gardens = TeaGarden.objects.all()
         data = []
@@ -384,7 +523,11 @@ class Teagardenlist(APIView):
                 "tea_garden_code": tg.tea_garden_code,
                 "tea_garden_name": tg.tea_garden_name
             })
-        return Response(data, status=status.HTTP_200_OK)
+        return Response({
+            "status_code": 200,
+            "message": "success",
+            "data": data
+        }, status=status.HTTP_200_OK)
     
 class Creachelist(APIView):
      def post(self, request):
@@ -519,11 +662,17 @@ class Healthcenterlist(APIView):
         data = []
         for hc in health_centers:
             data.append({
+                
                 "id": hc.id,
                 "code": hc.code,
                 "name": hc.name
             })
-        return Response(data, status=status.HTTP_200_OK)    
+        return Response({
+            "status_code": 200,
+            "message": "success",
+            "data": data
+        }, status=status.HTTP_200_OK)    
+        #return Response(data, status=status.HTTP_200_OK)    
     
     
 class CrecheChildDetailsAPI(APIView):
@@ -1051,6 +1200,190 @@ class HealthCenterDetailsAPI(APIView):
             'statistics': stats_data
         }
         
+
+class StoreFoodMonitoringAPI(APIView):
+    """
+    API to store food monitoring data by calling external API and saving to database.
+    Required params: food_image, creche_id
+    Optional params: meal_type, entered_by_id
+    External API: http://45.64.107.97:5011/api/v1/food_monitoring
+    """
     
+    parser_classes = (MultiPartParser, FormParser)
+    
+    def post(self, request):
+        from datetime import date
+        
+        # --- Extract request parameters ---
+        food_image = (
+            request.FILES.get('food_image') or
+            request.FILES.get('file') or
+            request.FILES.get('image')
+        )
+        creche_id = request.data.get('creche_id')
+        meal_type = request.data.get('meal_type', 'Lunch')
+        entered_by_id = request.data.get('entered_by_id')
+
+        # --- Validation ---
+        if not food_image:
+            return Response({
+                "status_code": 400,
+                "message": "food_image is required"
+            }, status=status.HTTP_200_OK)
+
+        if not creche_id:
+            return Response({
+                "status_code": 400,
+                "message": "creche_id is required"
+            }, status=status.HTTP_200_OK)
+
+        # --- Verify creche exists ---
+        try:
+            creche = Creche.objects.get(id=creche_id)
+        except Creche.DoesNotExist:
+            return Response({
+                "status_code": 404,
+                "message": "Creche not found"
+            }, status=status.HTTP_200_OK)
+
+        # --- Call external API ---
+        try:
+            files = {'food_image': (food_image.name, food_image.read(), food_image.content_type)}
+            response = requests.post(
+                'http://45.64.107.97:5011/api/v1/food_monitoring',
+                files=files,
+                timeout=60
+            )
+
+            if response.status_code != 200:
+                return Response({
+                    "status_code": response.status_code,
+                    "message": "External API error",
+                    "external_response": response.text
+                }, status=status.HTTP_200_OK)
+
+            ext_data = response.json()
+
+        except requests.exceptions.Timeout:
+            return Response({
+                "status_code": 408,
+                "message": "External API timed out"
+            }, status=status.HTTP_200_OK)
+        except requests.exceptions.ConnectionError as e:
+            return Response({
+                "status_code": 503,
+                "message": f"Cannot connect to external API: {str(e)}"
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({
+                "status_code": 500,
+                "message": f"Error calling external API: {str(e)}"
+            }, status=status.HTTP_200_OK)
+
+        # --- Parse external API response ---
+        try:
+            image_save_path = ext_data.get('image_save_path', '')
+            image_url = ext_data.get('image_url', '')
+            llm_response = ext_data.get('llm_response', {})
+            
+            # Extract food items
+            food_items = llm_response.get('food_items', [])
+            health_score = llm_response.get('health_score', 0)
+            dietary_tags = llm_response.get('dietary_tags', [])
+            recommendations = llm_response.get('recommendations', '')
+
+            # --- Calculate totals from food items ---
+            total_calories = 0
+            total_protein = 0
+            total_carbs = 0
+            total_fiber = 0
+
+            food_description_parts = []
+
+            for item in food_items:
+                item_name = item.get('name', '')
+                nutrition = item.get('nutrition', {})
+                
+                food_description_parts.append(f"- {item_name}")
+                
+                # Handle None values by converting them to 0
+                calories = nutrition.get('calories') or 0
+                protein = nutrition.get('protein') or 0
+                carbs = nutrition.get('carbs') or 0
+                fiber = nutrition.get('fiber') or 0
+                
+                total_calories += calories
+                total_protein += protein
+                total_carbs += carbs
+                total_fiber += fiber
+
+            # Build food description
+            food_description = f"Food Items:\n" + "\n".join(food_description_parts)
+            # food_description += f"\n\nHealth Score: {health_score}/10"
+            # food_description += f"\nDietary Tags: {', '.join(dietary_tags)}"
+            # food_description += f"\n\nRecommendations:\n{recommendations}"
+
+            # Get entered_by attendant (try CrecheAttendant ID first, then user_id)
+            entered_by = None
+            if entered_by_id:
+                try:
+                    entered_by = CrecheAttendant.objects.get(id=entered_by_id)
+                except CrecheAttendant.DoesNotExist:
+                    # Try lookup by user_id (in case they passed a user ID instead)
+                    from django.contrib.auth import get_user_model
+                    User = get_user_model()
+                    try:
+                        user = User.objects.get(id=entered_by_id)
+                        entered_by = CrecheAttendant.objects.filter(
+                            user=user, creche=creche
+                        ).first()
+                    except User.DoesNotExist:
+                        pass
+
+            # --- Store in database ---
+            food_monitoring = FoodMonitoring.objects.create(
+                creche=creche,
+                monitoring_date=date.today(),
+                meal_type=meal_type,
+                food_description=food_description,
+                estimated_calories=total_calories,
+                estimated_protein_g=total_protein,
+                estimated_carbs_g=total_carbs,
+                estimated_fibre_g=total_fiber,
+                remarks=f"External API Image: {image_save_path}",
+                entered_by=entered_by
+            )
+
+            # --- Build response ---
+            return Response({
+                "status_code": 200,
+                "message": "Food monitoring data stored successfully",
+                "data": {
+                    "id": food_monitoring.id,
+                    "creche_id": creche.id,
+                    "creche_name": creche.creche_name,
+                    "monitoring_date": date.today(),
+                    "meal_type": meal_type,
+                    "food_items_count": len(food_items),
+                    "health_score": health_score,
+                    "nutrition": {
+                        "total_calories": float(total_calories),
+                        "total_protein_g": float(total_protein),
+                        "total_carbs_g": float(total_carbs),
+                        "total_fibre_g": float(total_fiber)
+                    },
+                    "external_image_url": image_url,
+                    "external_image_path": image_save_path,
+                    "food_items": food_items,
+                    "entered_by_id": entered_by.id if entered_by else None,
+                    "entered_by_name": entered_by.attendant_name if entered_by else None
+                }
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                "status_code": 500,
+                "message": f"Error processing response: {str(e)}"
+            }, status=status.HTTP_200_OK)
     
     
