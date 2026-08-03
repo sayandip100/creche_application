@@ -11,7 +11,7 @@ from creches.serializers import LoginSerializer , AttendantRegisterSerializer , 
 from django.contrib.auth import get_user_model
 
 from django.utils import timezone
-# from creches.utils import get_face_encoding
+from creches.utils import get_face_encoding
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
 import pickle

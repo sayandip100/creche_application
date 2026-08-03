@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -127,9 +128,9 @@ class AddPatientAPI(APIView):
                         "doctor_id": patient_treatment.doctor.id if patient_treatment.doctor else None,
                         "doctor_name": patient_treatment.doctor.name if patient_treatment.doctor else None,
                         "status": patient_treatment.status,
-                        "treatment_date": patient_treatment.treatment_date.isoformat() if patient_treatment.treatment_date else None,
+                        "treatment_date": timezone.localtime(patient_treatment.treatment_date).isoformat(),
                         "remarks": patient_treatment.remarks,
-                        "created_at": patient_treatment.created_at.isoformat() if patient_treatment.created_at else None,
+                        "created_at": timezone.localtime(patient_treatment.created_at).isoformat(),
                     }
                 },
                 status=status.HTTP_201_CREATED
