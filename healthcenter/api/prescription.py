@@ -5,6 +5,7 @@ import logging
 import requests
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Case, IntegerField, Sum, When
 from django.utils import timezone
 from django.utils.html import strip_tags
 from rest_framework import status
@@ -45,6 +46,8 @@ class GeneratePrescriptionAPI(APIView):
     - medicines (required): JSON array of prescribed medicines
         [{"id": 1, "quantity": 10},
          {"id": 2, "quantity": 5}]
+    - doctor_remarks (required): Doctor's remarks and advice
+    - doctor_prescription_image (required): Doctor's prescription image file
     - send_whatsapp (optional): Boolean (default: true)
 
     Response:
@@ -77,6 +80,8 @@ class GeneratePrescriptionAPI(APIView):
             patient_treatment_id = request.data.get('patient_treatment_id')
             medicines_data = request.data.get('medicines')
             send_whatsapp = request.data.get('send_whatsapp', 'true')
+            doctor_remarks = request.data.get('doctor_remarks')
+            doctor_prescription_image = request.FILES.get('doctor_prescription_image')
 
             # Validate required fields
             required_fields = {
@@ -85,6 +90,8 @@ class GeneratePrescriptionAPI(APIView):
                 'doctor_id': doctor_id,
                 'patient_treatment_id': patient_treatment_id,
                 'medicines': medicines_data,
+                'doctor_remarks': doctor_remarks,
+                'doctor_prescription_image': doctor_prescription_image,
             }
             missing = [k for k, v in required_fields.items() if not v]
             if missing:
@@ -162,11 +169,19 @@ class GeneratePrescriptionAPI(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
             # ============================================
-            # UPDATE TREATMENT - set doctor & nurse
+            # UPDATE TREATMENT - set doctor, nurse, remarks & prescription image
             # ============================================
             treatment.doctor = doctor
             treatment.nurse = nurse
             treatment.status = 2  # Completed
+            if doctor_remarks:
+                treatment.doctor_remarks = doctor_remarks
+            if doctor_prescription_image:
+                treatment.doctor_prescription_image.save(
+                    f"doctor_prescription_{treatment.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.{doctor_prescription_image.name.split('.')[-1]}",
+                    doctor_prescription_image,
+                    save=False
+                )
             treatment.save()
 
             # ============================================
@@ -229,6 +244,7 @@ class GeneratePrescriptionAPI(APIView):
                 # Deduct stock (to be batch updated)
                 old_stock = stock.current_stock_qty
                 stock.current_stock_qty -= quantity
+                stock.last_updated_at = timezone.now()  # Explicitly set for bulk_update (auto_now doesn't trigger on bulk_update)
                 stocks_to_update.append(stock)
 
                 # Prepare transaction record
@@ -355,6 +371,11 @@ class GeneratePrescriptionAPI(APIView):
                 # Log that we couldn't generate URL
                 logger.error(f"Could not build prescription URL. PDF error: {pdf_error}")
 
+            # Build doctor prescription image URL
+            doctor_prescription_image_url = None
+            if treatment.doctor_prescription_image:
+                doctor_prescription_image_url = request.build_absolute_uri(treatment.doctor_prescription_image.url)
+
             # ============================================
             # SEND VIA WHATSAPP
             # ============================================
@@ -391,6 +412,7 @@ class GeneratePrescriptionAPI(APIView):
                 'data': {
                     'prescription_id': treatment.id,
                     'prescription_url': prescription_image_url,
+                    'doctor_prescription_image_url': doctor_prescription_image_url,
                     'pdf_generated': pdf_generated,
                     'pdf_error': pdf_error,
                     'patient': {
@@ -446,11 +468,13 @@ class GeneratePrescriptionAPI(APIView):
                 'age': treatment.age,
                 'contact': treatment.contact_number,
                 'remarks': treatment.remarks or '',
+                'date_treated': treatment.treatment_date.strftime('%Y-%m-%d') if treatment.treatment_date else 'N/A',
             },
             'doctor': {
                 'name': doctor.name or doctor.user.username,
                 'qualification': doctor.qualification or '',
                 'specialization': doctor.specialization or '',
+                'remarks': treatment.doctor_remarks or '',
             },
             'nurse': {
                 'name': nurse.nurse_name or nurse.user.username,
@@ -458,8 +482,286 @@ class GeneratePrescriptionAPI(APIView):
             'medicines': medicines,
             'generated_at': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
-
+    
+    
     def _generate_local_pdf(self, data):
+        """Generate a professional PDF prescription using reportlab."""
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import mm
+            from reportlab.platypus import (
+                Paragraph,
+                Spacer,
+                Table,
+                TableStyle,
+                SimpleDocTemplate,
+                HRFlowable,
+            )
+            from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=A4,
+                topMargin=16*mm,
+                bottomMargin=16*mm,
+                leftMargin=18*mm,
+                rightMargin=18*mm,
+            )
+
+            # ---- Color palette (light green theme) ----
+            PRIMARY = colors.HexColor('#4c8c4a')       # medium green
+            PRIMARY_DARK = colors.HexColor('#2f5d31')   # deep forest green
+            ACCENT = colors.HexColor('#8bc34a')         # light leafy green accent
+            TEXT_DARK = colors.HexColor('#1c2b1e')
+            TEXT_MUTED = colors.HexColor('#4a5d4c')
+            BG_SOFT = colors.HexColor('#f2f8f0')
+            BORDER_SOFT = colors.HexColor('#d3e8cd')
+            ROW_ALT = colors.HexColor('#f6faf4')
+
+            styles = getSampleStyleSheet()
+            story = []
+
+            # ---- Styles ----
+            clinic_name_style = ParagraphStyle(
+                'ClinicName', parent=styles['Title'],
+                fontName='Helvetica-Bold', fontSize=19, leading=22,
+                textColor=PRIMARY_DARK, spaceAfter=1, alignment=TA_LEFT,
+            )
+            clinic_sub_style = ParagraphStyle(
+                'ClinicSub', parent=styles['Normal'],
+                fontSize=9.5, leading=13, textColor=TEXT_MUTED, alignment=TA_LEFT,
+            )
+            rx_id_style = ParagraphStyle(
+                'RxId', parent=styles['Normal'],
+                fontName='Helvetica-Bold', fontSize=11, leading=14,
+                textColor=PRIMARY_DARK, alignment=TA_RIGHT,
+            )
+            rx_date_style = ParagraphStyle(
+                'RxDate', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=9.5, leading=13,
+                textColor=TEXT_DARK, alignment=TA_RIGHT,
+            )
+            doc_title_style = ParagraphStyle(
+                'DocTitle', parent=styles['Normal'],
+                fontName='Helvetica-Bold', fontSize=13.5, leading=16,
+                textColor=PRIMARY_DARK, alignment=TA_CENTER,
+                spaceBefore=2, spaceAfter=2,
+            )
+            heading_style = ParagraphStyle(
+                'CustomHeading', parent=styles['Heading2'],
+                fontName='Helvetica-Bold', fontSize=11.5,
+                spaceAfter=6, spaceBefore=4,
+                textColor=colors.white,
+            )
+            label_style = ParagraphStyle(
+                'Label', parent=styles['Normal'],
+                fontName='Helvetica-Bold', fontSize=9.5,
+                textColor=TEXT_MUTED, leading=14,
+            )
+            value_style = ParagraphStyle(
+                'Value', parent=styles['Normal'],
+                fontSize=10.5, textColor=TEXT_DARK, leading=14,
+            )
+            normal_style = ParagraphStyle(
+                'CustomNormal', parent=styles['Normal'],
+                fontSize=10.5, spaceAfter=4, leading=15.5, textColor=TEXT_DARK,
+            )
+            footer_style = ParagraphStyle(
+                'Footer', parent=normal_style, fontSize=8,
+                textColor=TEXT_MUTED, alignment=TA_CENTER, leading=11,
+            )
+            sig_style = ParagraphStyle(
+                'Signature', parent=normal_style, fontSize=9.5,
+                textColor=TEXT_DARK, alignment=TA_RIGHT, leading=13,
+            )
+
+            # ================= HEADER =================
+            hc_name = data.get('health_center', {}).get('name', 'Health Center')
+            hc_address = data.get('health_center', {}).get('address', '')
+            rx_id = data.get('prescription_id', 'N/A')
+            patient = data.get('patient', {})
+            doctor = data.get('doctor', {})
+            nurse = data.get('nurse', {})
+            rx_date = patient.get('date_treated', '') or 'N/A'
+
+            header_left = [Paragraph(hc_name, clinic_name_style)]
+            if hc_address:
+                header_left.append(Paragraph(hc_address, clinic_sub_style))
+
+            header_right = [
+               
+                Paragraph(f"Visit Date: {rx_date}", rx_date_style),
+            ]
+
+            header_table = Table(
+                [[header_left, header_right]],
+                colWidths=[300, 200],
+            )
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(header_table)
+            story.append(Spacer(1, 4*mm))
+
+            # ---- Document heading ----
+            story.append(Paragraph("PATIENT PRESCRIPTION", doc_title_style))
+            story.append(Spacer(1, 2*mm))
+
+            story.append(HRFlowable(width="100%", thickness=2, color=PRIMARY, spaceAfter=1))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=ACCENT, spaceAfter=6*mm))
+
+            # ================= PATIENT & DOCTOR INFO =================
+            info_data = [
+                [Paragraph('PATIENT', label_style), Paragraph('ATTENDING DOCTOR', label_style)],
+                [Paragraph(patient.get('name', 'N/A'), value_style),
+                 Paragraph(doctor.get('name', 'N/A'), value_style)],
+                [Paragraph(f"Age: {patient.get('age', 'N/A')}", value_style),
+                 Paragraph(doctor.get('qualification', '') or '&nbsp;', value_style)],
+                [Paragraph(f"Contact: {patient.get('contact', '') or 'N/A'}", value_style),
+                 Paragraph(doctor.get('specialization', '') or '&nbsp;', value_style)],
+                [Paragraph(f"Attending Nurse: {nurse.get('name', 'N/A')}", value_style),
+                 Paragraph('', value_style)],
+            ]
+
+            info_table = Table(info_data, colWidths=[250, 250])
+            info_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), BG_SOFT),
+                ('LINEBELOW', (0, 0), (-1, 0), 0.75, BORDER_SOFT),
+                ('BOX', (0, 0), (-1, -1), 0.75, BORDER_SOFT),
+                ('LINEAFTER', (0, 0), (0, -1), 0.75, BORDER_SOFT),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 7*mm))
+
+            def section_heading(text):
+                t = Table([[Paragraph(text, heading_style)]], colWidths=[500])
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), PRIMARY),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                return t
+
+            # ================= PATIENT REMARKS =================
+            remarks = patient.get('remarks', '')
+            if remarks:
+                story.append(section_heading("PATIENT REMARKS"))
+                story.append(Spacer(1, 2*mm))
+                story.append(Paragraph(remarks, normal_style))
+                story.append(Spacer(1, 5*mm))
+
+            # ================= DOCTOR'S REMARKS / ADVICE =================
+            doctor_remarks = doctor.get('remarks', '')
+            if doctor_remarks:
+                story.append(section_heading("DOCTOR'S REMARKS & ADVICE"))
+                story.append(Spacer(1, 2*mm))
+                remarks_para = Paragraph(doctor_remarks, normal_style)
+                remarks_table = Table([[remarks_para]], colWidths=[500])
+                remarks_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), BG_SOFT),
+                    ('BOX', (0, 0), (-1, -1), 0.75, ACCENT),
+                    ('LINEBEFORE', (0, 0), (0, -1), 3, ACCENT),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 12),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                story.append(remarks_table)
+                story.append(Spacer(1, 5*mm))
+
+            # ================= MEDICINES TABLE =================
+            story.append(section_heading("PRESCRIBED MEDICINES"))
+            story.append(Spacer(1, 2*mm))
+            med_list = data.get('medicines', [])
+
+            if med_list:
+                med_table_data = [['#', 'Medicine', 'Quantity']]
+                for idx, med in enumerate(med_list, 1):
+                    med_table_data.append([
+                        str(idx),
+                        med.get('medicine_name', ''),
+                        str(med.get('quantity', '')),
+                    ])
+
+                med_table = Table(med_table_data, colWidths=[30, 300, 170])
+                row_styles = [
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_DARK),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (1, 0), (-1, -1), 'LEFT'),
+                    ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+                    ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, BORDER_SOFT),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+                    ('TOPPADDING', (0, 0), (-1, -1), 7),
+                ]
+                for i in range(1, len(med_table_data)):
+                    if i % 2 == 0:
+                        row_styles.append(('BACKGROUND', (0, i), (-1, i), ROW_ALT))
+                med_table.setStyle(TableStyle(row_styles))
+                story.append(med_table)
+            else:
+                story.append(Paragraph("No medicines prescribed.", normal_style))
+
+            # ================= SIGNATURE =================
+            story.append(Spacer(1, 14*mm))
+            sig_table = Table(
+                [[Paragraph('&nbsp;', normal_style),
+                  Paragraph(f"__________________________<br/><b>{doctor.get('name', '')}</b><br/>{doctor.get('qualification', '')}", sig_style)]],
+                colWidths=[280, 220],
+            )
+            sig_table.setStyle(TableStyle([
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(sig_table)
+
+            # ================= FOOTER =================
+            story.append(Spacer(1, 8*mm))
+            story.append(HRFlowable(width="100%", thickness=0.75, color=BORDER_SOFT, spaceAfter=3*mm))
+            story.append(Paragraph(
+                "This is a computer-generated prescription and does not require a physical stamp to be valid.",
+                footer_style
+            ))
+            story.append(Paragraph(f"{hc_name} · Generated on {rx_date}", footer_style))
+
+            doc.build(story)
+            pdf_content = buffer.getvalue()
+            buffer.close()
+
+            if pdf_content:
+                logger.info(f"PDF generated successfully, size: {len(pdf_content)} bytes")
+                return pdf_content
+            else:
+                logger.error("PDF buffer is empty after build")
+                return None
+
+        except ImportError as ie:
+            logger.warning(f"reportlab not installed: {ie}. Install with: pip install reportlab")
+            return None
+        except Exception as e:
+            logger.error(f"Error in _generate_local_pdf: {e}", exc_info=True)
+            return None   
+    def _generate_local_pdf_old(self, data):
         """Generate a professional PDF prescription using reportlab."""
         try:
             from reportlab.lib import colors
@@ -561,8 +863,28 @@ class GeneratePrescriptionAPI(APIView):
             # Remarks from patient treatment
             remarks = patient.get('remarks', '')
             if remarks:
-                story.append(Paragraph("<b>REMARKS</b>", heading_style))
+                story.append(Paragraph("<b>PATIENT REMARKS</b>", heading_style))
                 story.append(Paragraph(remarks, normal_style))
+                story.append(Spacer(1, 3*mm))
+
+            # Doctor's Remarks / Prescription Advice
+            doctor_remarks = doctor.get('remarks', '')
+            if doctor_remarks:
+                story.append(Paragraph("<b>DOCTOR'S REMARKS & ADVICE</b>", heading_style))
+                # Add a light blue background box for doctor's remarks
+                remarks_para = Paragraph(doctor_remarks, normal_style)
+                remarks_data = [[remarks_para]]
+                remarks_table = Table(remarks_data, colWidths=[500])
+                remarks_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#eaf2f8')),
+                    ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#2980b9')),
+                    ('TOPPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ]))
+                story.append(remarks_table)
                 story.append(Spacer(1, 3*mm))
 
             # Medicines Table
@@ -807,13 +1129,13 @@ class MedicineListAPI(APIView):
                     'data': {}
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Fetch all active medicines
-            medicines = Medicine.objects.filter(is_active=True).order_by('medicine_name')
+            # Fetch all active medicines - newest first (last inserted on top)
+            medicines = Medicine.objects.filter(is_active=True).order_by('-id')
             
             # Pre-fetch all stock records for this health center in one query
             stock_records = {
                 s.medicine_id: s
-                for s in HealthCenterMedicineStock.objects.filter(health_center=health_center)
+                for s in HealthCenterMedicineStock.objects.filter(health_center=health_center).select_related('medicine')
             }
             
             medicines_data = []
@@ -822,10 +1144,39 @@ class MedicineListAPI(APIView):
                 
                 if stock:
                     current_stock_qty = stock.current_stock_qty
-                    last_updated_at = stock.last_updated_at.isoformat()
+                    last_updated_at = stock.last_updated_at.isoformat() if stock.last_updated_at else None
                 else:
-                    current_stock_qty = 0
+                    # No stock record exists for this health center - 
+                    # calculate stock from transaction history as fallback
+                    transaction_totals = MedicineStockTransaction.objects.filter(
+                        health_center=health_center,
+                        medicine=medicine
+                    ).aggregate(
+                        total_in=Sum(Case(When(transaction_type='IN', then='quantity'), default=0, output_field=IntegerField())),
+                        total_out=Sum(Case(When(transaction_type='OUT', then='quantity'), default=0, output_field=IntegerField())),
+                        total_adj=Sum(Case(When(transaction_type='ADJUSTMENT', then='quantity'), default=0, output_field=IntegerField())),
+                    )
+                    current_stock_qty = (transaction_totals['total_in'] or 0) - (transaction_totals['total_out'] or 0) + (transaction_totals['total_adj'] or 0)
                     last_updated_at = None
+                    
+                    # If transactions indicate stock exists, create the missing stock record
+                    if current_stock_qty > 0:
+                        try:
+                            stock = HealthCenterMedicineStock.objects.create(
+                                health_center=health_center,
+                                medicine=medicine,
+                                current_stock_qty=current_stock_qty
+                            )
+                            logger.info(f"Created missing stock record for {medicine.medicine_name} at {health_center.name} with qty {current_stock_qty}")
+                        except Exception as e:
+                            logger.error(f"Failed to create missing stock record: {e}")
+                
+                # is_low_stock logic: if stock record exists (either original or newly created from transactions), compare with min_stock_level
+                if stock:
+                    is_low_stock = current_stock_qty < medicine.min_stock_level
+                else:
+                    # No stock record and no transactions = effectively no stock
+                    is_low_stock = True
                 
                 medicines_data.append({
                     'id': medicine.id,
@@ -835,7 +1186,7 @@ class MedicineListAPI(APIView):
                     'min_stock_level': medicine.min_stock_level,
                     'current_stock_qty': current_stock_qty,
                     'last_updated_at': last_updated_at,
-                    'is_low_stock': current_stock_qty < medicine.min_stock_level if stock else True,
+                    'is_low_stock': is_low_stock,
                 })
             
             return Response({

@@ -34,6 +34,8 @@ class PatientTreatmentSerializer(serializers.ModelSerializer):
     nurse_name = serializers.CharField(source='nurse.nurse_name', read_only=True)
     doctor_id = serializers.IntegerField(source='doctor.id', read_only=True)
     doctor_name = serializers.CharField(source='doctor.name', read_only=True)
+    prescription_image = serializers.SerializerMethodField()
+    doctor_prescription_image = serializers.SerializerMethodField()
     
     class Meta:
         model = PatientTreatment
@@ -51,7 +53,7 @@ class PatientTreatmentSerializer(serializers.ModelSerializer):
             'doctor_id',
             'doctor_name',
             'prescription_image',
-            'image',
+            'doctor_prescription_image',
             'status',
             'treatment_date',
             'whatsapp_sent',
@@ -60,6 +62,23 @@ class PatientTreatmentSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         read_only_fields = ['id', 'created_at', 'treatment_date']
+
+    def get_prescription_image(self, obj):
+        if obj.prescription_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.prescription_image.url)
+            return obj.prescription_image.url
+        return None
+
+    def get_doctor_prescription_image(self, obj):
+        
+        if obj.doctor_prescription_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.doctor_prescription_image.url)
+            return obj.doctor_prescription_image.url
+        return None
     
 
 class AddPatientSerializer(serializers.Serializer):

@@ -2,12 +2,22 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from creches.models import CustomUser , Creche, CrecheAttendant, TeaGarden
 from django.contrib.auth import get_user_model
+from rest_framework.exceptions import APIException
 
 
+# ----------------------------- 
 
-# -----------------------------
+class CustomValidationError(APIException):
+    status_code = 400
+    default_code = 'validation_error'
 
-class LoginSerializer_old(serializers.Serializer):
+    def __init__(self, message):
+        self.detail = {
+            "status_code": 400,
+            "message": message
+        }
+
+class LoginSerializer_oldd_25526(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
@@ -17,11 +27,22 @@ class LoginSerializer_old(serializers.Serializer):
 
         if username and password:
             user = authenticate(username=username, password=password)
+        #     if not user:
+        #         raise serializers.ValidationError('Invalid credentials password or username is incorrect')
+        # else:
+        #     raise serializers.ValidationError('Must provide username and password')
             if not user:
-                raise serializers.ValidationError('Invalid credentials password or username is incorrect')
-        else:
-            raise serializers.ValidationError('Must provide username and password')
+                attrs['error'] = True
+                attrs['message'] = 'Invalid credentials password or username is incorrect'
+                return attrs
 
+        else:
+            attrs['error'] = True
+            attrs['message'] = 'Must provide username and password'
+            return attrs
+        
+
+        attrs['error'] = False
         attrs['user'] = user
         return attrs
     
@@ -41,7 +62,7 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError('Must provide username and password')
 
         attrs['user'] = user
-        return attrs    
+        return attrs        
     
 User = get_user_model()
     
@@ -73,9 +94,20 @@ class AttendantRegisterSerializer(serializers.Serializer):
 
     def validate(self, data):
         role = data.get('role')
-
+        
         if User.objects.filter(username=data['username']).exists():
-            raise serializers.ValidationError("Username already exists")
+            raise CustomValidationError("Username already exists")
+
+        # if User.objects.filter(username=data['username']).exists():
+        #     raise serializers.ValidationError("Username already exists")
+        
+    #     if User.objects.filter(username=data['username']).exists():
+    #         raise serializers.ValidationError({
+    #     "status_code": 400,
+    #     "message": "Username already exists"
+    # })
+            
+            
 
         # ✅ Attendant validation
         if role in ['attendant', 'super_attendant']:

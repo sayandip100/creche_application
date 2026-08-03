@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.db import transaction
-
+from rest_framework.permissions import IsAuthenticated
 from healthcenter.models import PatientTreatment, HealthCenter, Nurse, Doctor
 from healthcenter.serializers import AddPatientSerializer, PatientTreatmentSerializer
 
@@ -23,7 +23,7 @@ class AddPatientAPI(APIView):
     - remarks (optional): Additional remarks
     """
     
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     @transaction.atomic
     def post(self, request):
@@ -174,7 +174,7 @@ class PatientListAPI(APIView):
             queryset = queryset.order_by('-created_at')
             
             # Serialize
-            serializer = PatientTreatmentSerializer(queryset, many=True)
+            serializer = PatientTreatmentSerializer(queryset, many=True, context={'request': request})
             
             return Response(
                 {
@@ -213,7 +213,7 @@ class PatientListAPI(APIView):
             health_center_id = request.data.get('health_center_id')
             nurse_id = request.data.get('nurse_id')
             doctor_id = request.data.get('doctor_id')
-           
+            
             # Build query
             queryset = PatientTreatment.objects.all()
             
@@ -230,7 +230,7 @@ class PatientListAPI(APIView):
             queryset = queryset.order_by('-created_at')
             
             # Serialize
-            serializer = PatientTreatmentSerializer(queryset, many=True)
+            serializer = PatientTreatmentSerializer(queryset, many=True, context={'request': request})
             
             return Response(
                 {
@@ -258,7 +258,7 @@ class PatientDetailAPI(APIView):
     API endpoint to get, update, or delete a patient
     """
     
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, patient_id):
         try:

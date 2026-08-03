@@ -12,18 +12,16 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
-from rest_framework.permissions import IsAuthenticated
 
 from creches.models import Child, ChildAttendance, ChildAttendanceDetail, Creche, CrecheAttendant
 
 
-#EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance"
-EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance/child"
+EXTERNAL_ATTENDANCE_API_URL = "http://45.64.107.97:5010/api/v1/attendance"
 
 
 class MarkAttendanceAPI(APIView):
        
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     parser_classes = [MultiPartParser, FormParser]
 
     @transaction.atomic
@@ -113,33 +111,30 @@ class MarkAttendanceAPI(APIView):
             )
 
             if ext_response.status_code != 200:
-               return Response(
-    {
-        "message": ext_response.json().get("detail"),
-        "status_code": ext_response.status_code
-        #"external_response": ext_response.json()
-    },
-    status=status.HTTP_200_OK
-)
+                return Response(
+                    {
+                        "message": "External face recognition API message",
+                        "external_status": ext_response.status_code,
+                        "external_response": ext_response.text
+                    },
+                    status=status.HTTP_200_OK
+                )
 
             ext_data = ext_response.json()
 
         except requests.exceptions.Timeout:
             return Response(
-                {"message": "External face recognition API timed out",
-                 "status_code": 408},
+                {"message": "External face recognition API timed out"},
                 status=status.HTTP_200_OK
             )
         except requests.exceptions.Connectionmessage as e:
             return Response(
-                {"message": f"Cannot connect to external face recognition API: {str(e)}",
-                 "status_code":403},
+                {"message": f"Cannot connect to external face recognition API: {str(e)}"},
                 status=status.HTTP_200_OK
             )
         except Exception as e:
             return Response(
-                {"message": f"message calling external API: {str(e)}",
-                 "status_code": 500},
+                {"message": f"message calling external API: {str(e)}"},
                 status=status.HTTP_200_OK
             )
 
@@ -149,7 +144,7 @@ class MarkAttendanceAPI(APIView):
         already_present_ids = ext_data.get('already_present', [])  # list of child IDs already marked
         unknown_faces = ext_data.get('unknown_faces', 0)
         spoof_faces = ext_data.get('spoof_faces', 0)
-       # annotated_image_base64 = ext_data.get('annotated_image_base64', '')
+        annotated_image_base64 = ext_data.get('annotated_image_base64', '')
         child_attendance_id_ext = ext_data.get('child_attendance_id')      # external attendance ID
         attendance_photo_path = ext_data.get('attendance_photo', '')       # external photo path
 
@@ -215,7 +210,7 @@ class MarkAttendanceAPI(APIView):
         present_children = []
         absent_children = []
         already_present_children = []
-        
+
         # Get existing attendance details in one query
         existing_details = {
             d.child_id: d 
@@ -272,7 +267,7 @@ class MarkAttendanceAPI(APIView):
         # --- Build response ---
         return Response({
             "status_code": 200,
-            "message": "Attendance marked successfully",
+            "message": "success",
             "data": {
                 "attendance_id": attendance.id,
                 "creche_id": creche.id,
@@ -297,7 +292,7 @@ class MarkAttendanceAPI(APIView):
                 # External API reference
                 "external_attendance_id": child_attendance_id_ext,
                 "attendance_photo": attendance_photo_path,
-                #"annotated_image_base64": annotated_image_base64,
+                "annotated_image_base64": annotated_image_base64,
                 # Photo URL
                 "attendance_photo_url": request.build_absolute_uri(attendance.attendance_photo.url) if attendance.attendance_photo else None,
                 "external_photo_path": attendance_photo_path,
@@ -600,338 +595,4 @@ class AttendanceByDateRangeAPI(APIView):
             'total_present_entries': total_present,
             'total_absent_entries': total_absent,
             'daily_breakdown': daily_data
-        }, status=status.HTTP_200_OK)
-        
-        
-class DetectChildrenFromPhotoAPI(APIView):
-    """
-    API endpoint to detect children from a photo without updating the database.
-    Returns the list of detected children with their status.
-    """
-    permission_classes = [AllowAny]
-    parser_classes = [MultiPartParser, FormParser]
-
-    def post(self, request):
-        # --- Extract request parameters ---
-        group_photo = (
-            request.FILES.get('file') or
-            request.FILES.get('photo') or
-            request.FILES.get('image') or
-            request.FILES.get('attendance_photo')
-        )
-        creche_id = request.data.get('creche_id') or request.POST.get('creche_id')
-        marked_by_id = (
-            request.data.get('marked_by_id') or
-            request.POST.get('marked_by_id') or
-            request.data.get('mark_by_id') or
-            request.POST.get('mark_by_id')
-        )
-
-        # --- Validation ---
-        if not group_photo:
-            return Response(
-                {
-                    "status_code": 400,
-                    "message": "file (group photo) is required",
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if not creche_id:
-            return Response(
-                {
-                    "status_code": 400,
-                    "message": "creche_id is required"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            creche = Creche.objects.get(id=creche_id)
-        except Creche.DoesNotExist:
-            return Response(
-                {
-                    "status_code": 404,
-                    "message": "Creche not found"
-                },
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # --- Forward the group photo to external face recognition API ---
-        try:
-            files = {'file': (group_photo.name, group_photo.read(), group_photo.content_type)}
-            payload = {
-                'creche_id': creche_id,
-            }
-            
-            if marked_by_id:
-                payload['marked_by_id'] = marked_by_id
-
-            ext_response = requests.post(
-                EXTERNAL_ATTENDANCE_API_URL,
-                files=files,
-                data=payload,
-                timeout=60
-            )
-
-            if ext_response.status_code != 200:
-                return Response(
-                    {
-                        "status_code": ext_response.status_code,
-                        "message": "Face recognition error",
-                        "external_response": ext_response.text
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            ext_data = ext_response.json()
-            
-            
-           
-            
-
-        except requests.exceptions.Timeout:
-            return Response(
-                {
-                    "status_code": 408,
-                    "message": "External face recognition API timed out"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except requests.exceptions.ConnectionError as e:
-            return Response(
-                {
-                    "status_code": 503,
-                    "message": f"Cannot connect to external face recognition API: {str(e)}"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        except Exception as e:
-            return Response(
-                {
-                    "status_code": 500,
-                    "message": f"Error calling external API: {str(e)}"
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Parse external API response ---
-        present_ids = ext_data.get('present', [])
-        already_present_ids = ext_data.get('already_present', [])
-        unknown_faces = ext_data.get('unknown_faces', 0)
-        spoof_faces = ext_data.get('spoof_faces', 0)
-
-        # --- Handle case where API might return dicts or IDs ---
-        def extract_id(item):
-            if isinstance(item, dict):
-                return item.get('id', item.get('child_id', item))
-            return item
-        
-        present_ids_clean = [extract_id(item) for item in present_ids]
-        already_present_ids_clean = [extract_id(item) for item in already_present_ids]
-
-        # --- Get all detected child IDs ---
-        all_detected_ids = set(present_ids_clean + already_present_ids_clean)
-
-        # --- Get today's attendance to check if already marked ---
-        today = date.today()
-        today_attendance = ChildAttendance.objects.filter(
-            creche=creche,
-            attendance_date=today,
-            attendance_mode='GROUP'
-        ).first()
-
-        already_marked_ids = set()
-        if today_attendance:
-            already_marked_ids = set(
-                ChildAttendanceDetail.objects.filter(
-                    child_attendance=today_attendance,
-                    attendance_status='PRESENT'
-                ).values_list('child_id', flat=True)
-            )
-
-        # --- Get child details and photos ---
-        children_response = []
-        
-        for child_id in all_detected_ids:
-            try:
-                child = Child.objects.get(id=child_id, creche=creche, is_active=True)
-                
-                # Get the front image URL
-                front_image_url = None
-                if child.photo:
-                    front_image_url = request.build_absolute_uri(child.photo.url)
-                else:
-                    # Try to get the first photo from ChildPhoto
-                    child_photo = ChildPhoto.objects.filter(child=child).first()
-                    if child_photo:
-                        front_image_url = request.build_absolute_uri(child_photo.photo.url)
-
-                # Determine if already marked
-                is_already_marked = child_id in already_marked_ids or child_id in already_present_ids_clean
-                child_status = 1 if is_already_marked else 0
-
-                children_response.append({
-                    "child_id": child_id,
-                    "front_image": front_image_url or "",
-                    "name": child.name,
-                    "child_status": child_status
-                })
-
-            except Child.DoesNotExist:
-                # Child not found in this creche, skip
-                 return Response({
-            "status_code": 400,
-            "message": "No Child Detected in the photo or Child does not belong to this creche",
-            
-            
-        }, status=status.HTTP_400_BAD_REQUEST)
-                #continue
-                
-        if (len(children_response)) == 0:
-            return Response({
-                "status_code": 400,
-                "message": "No Child Detected in the photo or Child does not belong to this creche",
-            }, status=status.HTTP_400_BAD_REQUEST)        
-
-        # --- Build response ---
-        return Response({
-            "status_code": 200,
-            "message": "Detection successful",
-            "Image_url": ext_data.get('image_url'),
-            "data": {
-                "total_faces_detected": len(all_detected_ids),
-                "unknown_faces": unknown_faces,
-                "spoof_faces": spoof_faces,
-                "children": children_response
-            }
-        }, status=status.HTTP_200_OK)  
-        
-        
-
-class MarkIndividualChildAttendanceAPI(APIView):
-    """
-    API endpoint to mark individual child attendance as PRESENT or ABSENT.
-    Required params: child_id (single ID or array of IDs)
-    Optional params: attendance_status (PRESENT/ABSENT), creche_id, marked_by_id
-    """
-    permission_classes = [AllowAny]
-
-    @transaction.atomic
-    def post(self, request):
-        # --- Extract request parameters ---
-        child_id_param = request.data.get('child_id')
-        creche_id = request.data.get('creche_id')
-        attendance_status = request.data.get('attendance_status', 'PRESENT').upper()
-        marked_by_id = request.data.get('marked_by_id')
-
-        # --- Validation ---
-        if not child_id_param:
-            return Response({
-                "status_code": 400,
-                "message": "child_id is required (can be single ID or array of IDs)"
-            }, status=status.HTTP_200_OK)
-
-        if attendance_status not in ['PRESENT', 'ABSENT']:
-            return Response({
-                "status_code": 400,
-                "message": "attendance_status must be 'PRESENT' or 'ABSENT'"
-            }, status=status.HTTP_200_OK)
-
-        # --- Convert to list if single value ---
-        if isinstance(child_id_param, list):
-            child_ids = [int(cid) for cid in child_id_param if cid]
-        else:
-            child_ids = [int(child_id_param)]
-
-        if not child_ids:
-            return Response({
-                "status_code": 400,
-                "message": "No valid child IDs provided"
-            }, status=status.HTTP_200_OK)
-
-        # --- Get all children ---
-        children = Child.objects.filter(id__in=child_ids, is_active=True)
-        
-        if not children.exists():
-            return Response({
-                "status_code": 404,
-                "message": "No valid children found"
-            }, status=status.HTTP_200_OK)
-
-        # --- Get creche (from first child if not provided) ---
-        first_child = children.first()
-        creche = first_child.creche
-        if creche_id:
-            try:
-                creche = Creche.objects.get(id=creche_id)
-            except Creche.DoesNotExist:
-                return Response({
-                    "status_code": 404,
-                    "message": "Creche not found"
-                }, status=status.HTTP_200_OK)
-
-        # --- Get or create attendance record for today ---
-        today = date.today()
-        remarks = f"Individual attendance marked for {len(children)} children"
-        
-        marked_by = None
-        if marked_by_id:
-            try:
-                marked_by = CrecheAttendant.objects.get(id=marked_by_id)
-                remarks += f" by {marked_by.user.username}"
-            except CrecheAttendant.DoesNotExist:
-                pass
-
-        attendance, created = ChildAttendance.objects.get_or_create(
-            creche=creche,
-            attendance_date=today,
-            attendance_mode='INDIVIDUAL',
-            defaults={
-                'marked_by': marked_by,
-                'remarks': remarks,
-            }
-        )
-
-        # --- Create or update child attendance details in batch ---
-        marked_children = []
-        
-        for child in children:
-            detail, detail_created = ChildAttendanceDetail.objects.update_or_create(
-                child_attendance=attendance,
-                child_id=child.id,
-                defaults={'attendance_status': attendance_status}
-            )
-
-            # --- Get child photo ---
-            front_image_url = None
-            if child.photo:
-                front_image_url = request.build_absolute_uri(child.photo.url)
-            else:
-                child_photo = ChildPhoto.objects.filter(child=child).first()
-                if child_photo:
-                    front_image_url = request.build_absolute_uri(child_photo.photo.url)
-
-            marked_children.append({
-                "child_id": child.id,
-                "child_name": child.name,
-                "front_image": front_image_url or "",
-                "attendance_status": attendance_status,
-                "is_newly_created": detail_created
-            })
-
-        # --- Build response ---
-        return Response({
-            "status_code": 200,
-            "message": f"Attendance marked successfully for {len(marked_children)} children as {attendance_status}",
-            "data": {
-                "attendance_id": attendance.id,
-                "creche_id": creche.id,
-                "creche_name": creche.creche_name,
-                "attendance_date": today,
-                "attendance_status": attendance_status,
-                "attendance_mode": "INDIVIDUAL",
-                "total_marked": len(marked_children),
-                "children": marked_children
-            }
         }, status=status.HTTP_200_OK)

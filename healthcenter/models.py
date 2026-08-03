@@ -51,6 +51,58 @@ class Doctor(models.Model):
         return f"{self.user.username} ({self.health_center.name})"
 
 
+
+class DoctorCheckIn(models.Model):
+    STATUS_CHOICES = [
+        ('CHECKED_IN', 'Checked In'),
+        ('CHECKED_OUT', 'Checked Out'),
+    ]
+
+    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='check_ins')
+    health_center = models.ForeignKey(HealthCenter, on_delete=models.CASCADE, related_name='doctor_check_ins')
+
+    check_in_date = models.DateField()
+    check_in_time = models.DateTimeField()
+    check_in_photo = models.ImageField(upload_to='doctor_checkin_photos/', blank=True, null=True)
+    check_in_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_in_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_in_geo_verified = models.BooleanField(default=False)
+    
+    # Face verification
+    face_match_score = models.FloatField(default=0.0)
+    face_verified = models.BooleanField(default=False)
+
+    check_out_time = models.DateTimeField(null=True, blank=True)
+    check_out_photo = models.ImageField(upload_to='doctor_checkout_photos/', blank=True, null=True)
+    check_out_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_out_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    check_out_geo_verified = models.BooleanField(default=False)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CHECKED_IN')
+    duration_minutes = models.IntegerField(null=True, blank=True)
+    
+    # Additional tracking fields
+    attendance_date = models.DateField(null=True, blank=True)
+    nurse_present = models.BooleanField(default=False)
+    hygiene_maintained = models.BooleanField(default=False)
+    patients_visited_today = models.IntegerField(default=0)
+    
+    remarks = models.TextField(blank=True, null=True)
+    checkout_remarks = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-check_in_time']
+        verbose_name = 'Doctor Check-In'
+        verbose_name_plural = 'Doctor Check-Ins'
+
+    def __str__(self):
+        return f"{self.doctor.name} - {self.check_in_date} ({self.status})"
+
+
+
+
 # -----------------------------
 # Nurse (Head + Normal)
 # -----------------------------
@@ -81,9 +133,6 @@ class Nurse(models.Model):
         return f"{self.user.username} ({self.role})"
 
 
-# -----------------------------
-# Nurse Photo
-# -----------------------------
 class NursePhoto(models.Model):
     nurse = models.ForeignKey(Nurse, on_delete=models.CASCADE, related_name='photos')
     photo = models.ImageField(upload_to='nurses/photos/')
@@ -150,6 +199,8 @@ class DoctorPhotoEmbedding(models.Model):
         return f"{self.doctor.name} - Embedding for Photo {self.doctor_photo.id}"
 
 
+
+
 # -----------------------------
 # Doctor Attendance
 # -----------------------------
@@ -186,58 +237,6 @@ class DoctorAttendance(models.Model):
 
 
 # -----------------------------
-# Doctor Check-In (Separate tracking table)
-# -----------------------------
-class DoctorCheckIn(models.Model):
-    STATUS_CHOICES = [
-        ('CHECKED_IN', 'Checked In'),
-        ('CHECKED_OUT', 'Checked Out'),
-    ]
-
-    doctor = models.ForeignKey(Doctor, on_delete=models.CASCADE, related_name='check_ins')
-    health_center = models.ForeignKey(HealthCenter, on_delete=models.CASCADE, related_name='doctor_check_ins')
-
-    check_in_date = models.DateField()
-    check_in_time = models.DateTimeField()
-    check_in_photo = models.ImageField(upload_to='doctor_checkin_photos/', blank=True, null=True)
-    check_in_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    check_in_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    check_in_geo_verified = models.BooleanField(default=False)
-    
-    # Face verification
-    face_match_score = models.FloatField(default=0.0)
-    face_verified = models.BooleanField(default=False)
-
-    check_out_time = models.DateTimeField(null=True, blank=True)
-    check_out_photo = models.ImageField(upload_to='doctor_checkout_photos/', blank=True, null=True)
-    check_out_latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    check_out_longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    check_out_geo_verified = models.BooleanField(default=False)
-
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CHECKED_IN')
-    duration_minutes = models.IntegerField(null=True, blank=True)
-    
-    # Additional tracking fields
-    attendance_date = models.DateField(null=True, blank=True)
-    nurse_present = models.BooleanField(default=False)
-    hygiene_maintained = models.BooleanField(default=False)
-    patients_visited_today = models.IntegerField(default=0)
-    
-    remarks = models.TextField(blank=True, null=True)
-    checkout_remarks = models.TextField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['-check_in_time']
-        verbose_name = 'Doctor Check-In'
-        verbose_name_plural = 'Doctor Check-Ins'
-
-    def __str__(self):
-        return f"{self.doctor.name} - {self.check_in_date} ({self.status})"
-
-
-# -----------------------------
 # Nurse Attendance
 # -----------------------------
 class NurseAttendance(models.Model):
@@ -265,10 +264,24 @@ class NurseAttendance(models.Model):
 # -----------------------------
 # Medicine Master
 # -----------------------------
+class MedicineUnit(models.Model):
+    unit_name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = 'Medicine Unit'
+        verbose_name_plural = 'Medicine Units'
+        ordering = ['unit_name']
+
+    def __str__(self):
+        return self.unit_name
+
+
+
 class Medicine(models.Model):
     medicine_name = models.CharField(max_length=200, unique=True)
     medicine_code = models.CharField(max_length=50, unique=True, null=True, blank=True)
 
+    unit = models.ForeignKey(MedicineUnit, on_delete=models.SET_NULL, null=True, blank=True, related_name='medicines')
     unit_name = models.CharField(max_length=50, default='Unit')
     min_stock_level = models.IntegerField(default=5)
 
@@ -302,12 +315,6 @@ class PatientTreatment(models.Model):
     image = models.ImageField(upload_to='treatments/', null=True, blank=True)
     status = models.IntegerField(choices=STATUS_CHOICES, default=0)
 
-    # e-Prescription clinical fields
-    symptoms = models.TextField(null=True, blank=True, help_text="Patient symptoms")
-    diagnosis = models.TextField(null=True, blank=True, help_text="Diagnosis description")
-    doctor_remarks = models.TextField(null=True, blank=True, help_text="Doctor's remarks/notes")
-    followup_date = models.DateField(null=True, blank=True, help_text="Recommended follow-up date")
-
     treatment_date = models.DateTimeField(auto_now_add=True)
 
     whatsapp_sent = models.BooleanField(default=False)
@@ -315,6 +322,8 @@ class PatientTreatment(models.Model):
 
     remarks = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    doctor_prescription_image = models.ImageField(upload_to='doctor_prescriptions/', null=True, blank=True, help_text="Doctor's prescription image/file")
+    doctor_remarks = models.TextField(null=True, blank=True, help_text="Doctor's remarks/notes")
 
     def __str__(self):
         return self.patient_name

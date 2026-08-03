@@ -17,18 +17,23 @@ Including another URLconf
 from django.contrib import admin
 from django.conf.urls.static import static
 from django.urls import path
-
+from django.urls import path, include
 from creache_app_project import settings
-from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI, MobileLoginAPI
-from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI, StoreFoodMonitoringAPI
-from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI, DetectChildrenFromPhotoAPI, MarkIndividualChildAttendanceAPI
-from creches.api.attendant_checkin import CheckInAPI
-from creches.api.super_attendant import AttendantListByTeaGardenAPI, PromotetoSuperAPI, NurseListByTeaGardenAPI
+from creches.api.auth import LoginAPI, AttendantRegisterAPI, ChildRegisterAPI, ChildListAPI, CrecheCreateAPI, GetRefreshTokenAPI, LogoutAPI , MobileLoginAPI 
+from creches.api.reports import ChildAttendanceReportAPI, FoodMonitoringReportAPI , AttendantAttendanceReportAPI , Teagardenlist , Creachelist ,Healthcenterlist, HealthCenterDetailsAPI, CrecheChildDetailsAPI, CrecheDetailsAPI, AttendantDetailsAPI,StoreFoodMonitoringAPI,FoodRecordCreateAPI, FoodRecordAttendentUpdateAPI , FoodRecordAttendentListAPI
+from creches.api.attendance import MarkAttendanceAPI, GetAttendanceByDateAPI, ChildAttendanceHistoryAPI, AttendanceByDateRangeAPI , DetectChildrenFromPhotoAPI , MarkIndividualChildAttendanceAPI
 from healthcenter.api.patient import AddPatientAPI, PatientListAPI, PatientDetailAPI
+
+from creches.api.child_growth import ChildGrowthMonitoringAPI, ChildGrowthHistoryAPI, ChildGrowthDetailAPI, ChildGrowthDeleteAPI, ChildGrowthByDateRangeAPI
+
+from creches.api.attendant_checkin import CheckInAPI,CheckInStatusAPI
+from creches.api.super_attendant import AttendantListByTeaGardenAPI, PromotetoSuperAPI, NurseListByTeaGardenAPI
 from healthcenter.api.doctor_checkin import DoctorCheckInAPI, DoctorCheckOutAPI, DoctorCheckInStatusAPI
-from healthcenter.api.doctors import DoctorListAPI, DoctorDetailAPI
 from healthcenter.api.prescription import GeneratePrescriptionAPI, MedicineListAPI, MedicineDetailAPI
+from healthcenter.api.doctors import DoctorListAPI, DoctorDetailAPI
 from healthcenter.api.medicine_entry import MedicineEntryAPI
+from healthcenter.api.medicine_min_stock import MedicineMinStockUpdateAPI
+from healthcenter.api.medicine_requisition import MedicineRequisitionCreateAPI, MedicineRequisitionListAPI, MedicineRequisitionDetailAPI, MedicineRequisitionStatusUpdateAPI
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -41,55 +46,77 @@ urlpatterns = [
     path('children/list/', ChildListAPI.as_view(), name='child-list'),
     path('reports/child-attendance/', ChildAttendanceReportAPI.as_view(), name='child-attendance-report'),
     path('reports/food-monitoring/', FoodMonitoringReportAPI.as_view(), name='food-monitoring-report'),
-    path('reports/food-monitoring/store/', StoreFoodMonitoringAPI.as_view(), name='food-monitoring-store'),
     path('reports/crechelist/', Creachelist.as_view(), name='creche-list'),
+    path('reports/food-monitoring/store/', StoreFoodMonitoringAPI.as_view(), name='food-monitoring-store'),
     path('reports/healthcenterlist/', Healthcenterlist.as_view(), name='healthcenter-list'),
+    path('food-record-attendent/update/', FoodRecordAttendentUpdateAPI.as_view(), name='food-record-attendent-update'),
     path('reports/teagardenlist/', Teagardenlist.as_view(), name='teagarden-list'),
     path('reports/attendant-attendance/', AttendantAttendanceReportAPI.as_view(), name='attendant-attendance-report'),
     path('creches/create/', CrecheCreateAPI.as_view(), name='creche-create'),
     path('reports/children/', CrecheChildDetailsAPI.as_view(), name='creche-child-details'),
     path('reports/attendant/details/', AttendantDetailsAPI.as_view(), name='attendant-details'),
+    path('food-record/create/', FoodRecordCreateAPI.as_view(), name='food-record-create'),
+    path('food-record-attendent/list/', FoodRecordAttendentListAPI.as_view(), name='food-record-attendent-list'),
     path('reports/crechedetails/', CrecheDetailsAPI.as_view(), name='creche-details'),
     path('reports/healthcenter/details/', HealthCenterDetailsAPI.as_view(), name='health-center-details'),
+    #path('reports/crechedetails-new/', CrecheDetailsAPI_new.as_view(), name='creche-details'),
 
     # Child Attendance API
     path('attendance/mark/', MarkAttendanceAPI.as_view(), name='attendance-mark'),
-    path('attendance/mark-individual/', MarkIndividualChildAttendanceAPI.as_view(), name='attendance-mark-individual'),
-    path('attendance/detect-children/', DetectChildrenFromPhotoAPI.as_view(), name='attendance-detect-children'),
     path('attendance/by-date/', GetAttendanceByDateAPI.as_view(), name='attendance-by-date'),
     path('attendance/child-history/', ChildAttendanceHistoryAPI.as_view(), name='attendance-child-history'),
     path('attendance/date-range/', AttendanceByDateRangeAPI.as_view(), name='attendance-date-range'),
-
-    # Face matching API
-    #path('match-face/', MatchFaceAPI.as_view(), name='match-face'),
-
+    path('attendance/detect-children/', DetectChildrenFromPhotoAPI.as_view(), name='attendance-detect-children'),
+    path('attendance/mark-individual/', MarkIndividualChildAttendanceAPI.as_view(), name='attendance-mark-individual'),
     # Patient Treatment API
     path('patient/add/', AddPatientAPI.as_view(), name='add-patient'),
     path('patient/list/', PatientListAPI.as_view(), name='patient-list'),
     path('patient/<int:patient_id>/', PatientDetailAPI.as_view(), name='patient-detail'),
-
-    # Doctor Check-In API
+    
+     # Doctor Check-In API
     path('doctor/check-in/', DoctorCheckInAPI.as_view(), name='doctor-check-in'),
     path('doctor/check-out/', DoctorCheckOutAPI.as_view(), name='doctor-check-out'),
     path('doctor/check-in/status/', DoctorCheckInStatusAPI.as_view(), name='doctor-check-in-status'),
     
-    # Doctor List API
-    path('doctors/list/', DoctorListAPI.as_view(), name='doctor-list'),
-    path('doctor/<int:doctor_id>/', DoctorDetailAPI.as_view(), name='doctor-detail'),
-
-    # e-Prescription API
-    path('prescription/generate/', GeneratePrescriptionAPI.as_view(), name='prescription-generate'),
-    path('medicine/list/', MedicineListAPI.as_view(), name='medicine-list'),
-    path('medicine/entry/', MedicineEntryAPI.as_view(), name='medicine-entry'),
-    path('medicine/<int:medicine_id>/', MedicineDetailAPI.as_view(), name='medicine-detail'),
-
-    # Unified Check-In API (Attendant/Super Attendant + Nurse/Head Nurse)
+    
+     # Child Growth Monitoring API
+    path('child-growth/create/', ChildGrowthMonitoringAPI.as_view(), name='child-growth-create'),
+    path('child-growth/history/', ChildGrowthHistoryAPI.as_view(), name='child-growth-history'),
+    path('child-growth/detail/', ChildGrowthDetailAPI.as_view(), name='child-growth-detail'),
+    path('child-growth/delete/', ChildGrowthDeleteAPI.as_view(), name='child-growth-delete'),
+    path('child-growth/date-range/', ChildGrowthByDateRangeAPI.as_view(), name='child-growth-date-range'),
+   # path('attendant/check-in/', AttendantCheckInAPI.as_view(), name='attendant-check-in'),
+   
+   
     path('check-in/', CheckInAPI.as_view(), name='check-in'),
-
-    # Attendant & Nurse Management API (Admin only)
+    path('check-in/status/', CheckInStatusAPI.as_view(), name='check-in-status'),
+    
     path('attendants/list/', AttendantListByTeaGardenAPI.as_view(), name='attendant-list'),
     path('nurses/list/', NurseListByTeaGardenAPI.as_view(), name='nurse-list'),
     path('promote-to-super/', PromotetoSuperAPI.as_view(), name='promote-to-super'),
+    
+    
+      # e-Prescription API
+    path('prescription/generate/', GeneratePrescriptionAPI.as_view(), name='prescription-generate'),
+    path('medicine/list/', MedicineListAPI.as_view(), name='medicine-list'),
+    path('medicine/<int:medicine_id>/', MedicineDetailAPI.as_view(), name='medicine-detail'),
+    path('medicine/entry/', MedicineEntryAPI.as_view(), name='medicine-entry'),
+    
+    
+     # Medicine Requisition API
+    path('medicine/requisition/create/', MedicineRequisitionCreateAPI.as_view(), name='medicine-requisition-create'),
+    path('medicine/requisition/list/', MedicineRequisitionListAPI.as_view(), name='medicine-requisition-list'),
+    path('medicine/requisition/detail/', MedicineRequisitionDetailAPI.as_view(), name='medicine-requisition-detail'),
+    path('medicine/requisition/status-update/', MedicineRequisitionStatusUpdateAPI.as_view(), name='medicine-requisition-status-update'),
+    
+    
+     # Medicine Min Stock Level API
+    path('medicine/min-stock/update/', MedicineMinStockUpdateAPI.as_view(), name='medicine-min-stock-update'),
+    
+    
+     # Doctor List API
+    path('doctors/list/', DoctorListAPI.as_view(), name='doctor-list'),
+    path('doctor/<int:doctor_id>/', DoctorDetailAPI.as_view(), name='doctor-detail')
 ]
 
 

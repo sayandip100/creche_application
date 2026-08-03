@@ -92,9 +92,6 @@ class CrecheAttendant(models.Model):
         return f"{self.user.username} ({self.role})"
 
 
-# -----------------------------
-# Creche Attendant Photo
-# -----------------------------
 class CrecheAttendantPhoto(models.Model):
     attendant = models.ForeignKey(CrecheAttendant, on_delete=models.CASCADE, related_name='photos')
     photo = models.ImageField(upload_to='attendants/photos/')
@@ -124,6 +121,7 @@ class CrecheAttendantPhotoEmbedding(models.Model):
 
     def __str__(self):
         return f"{self.attendant.attendant_name} - Embedding for Photo {self.attendant_photo.id}"
+
 
 
 # -----------------------------
@@ -300,18 +298,25 @@ class FoodMonitoring(models.Model):
         return f"{self.creche.creche_name} - {self.monitoring_date}"
 
 
-# -----------------------------
-# Food Record
-# -----------------------------
+
+
+
 class FoodRecord(models.Model):
     """
     Records food items added for a creche.
     food_items stores an array of food items as JSON.
     """
+    FOOD_TIME_CHOICES = [
+        ('breakfast', 'Breakfast'),
+        ('lunch', 'Lunch'),
+        ('dinner', 'Dinner'),
+    ]
+
     creche = models.ForeignKey(Creche, on_delete=models.CASCADE, related_name='food_records')
     food_items = models.JSONField(help_text="Array of food items", default=list)
+    food_time = models.CharField(max_length=20, choices=FOOD_TIME_CHOICES, blank=True, null=True)
     added_by = models.ForeignKey(CrecheAttendant, on_delete=models.SET_NULL, null=True, blank=True, related_name='food_records')
-    food_update_date = models.DateTimeField(auto_now_add=True)
+    food_update_date = models.DateTimeField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -322,7 +327,37 @@ class FoodRecord(models.Model):
         verbose_name_plural = 'Food Records'
 
     def __str__(self):
-        return f"{self.creche.creche_name} - {self.food_update_date.date()}"
+        return f"{self.creche.creche_name} - {self.food_update_date.date() if self.food_update_date else 'No date'}"
+    
+    
+class FoodRecordAttendent(models.Model):
+    """
+    Same structure as FoodRecord - records food items added for a creche by attendent.
+    food_items stores an array of food items as JSON.
+    """
+    FOOD_TIME_CHOICES = [
+        ('breakfast', 'Breakfast'),
+        ('lunch', 'Lunch'),
+        ('dinner', 'Dinner'),
+    ]
+
+    creche = models.ForeignKey('Creche', on_delete=models.CASCADE, related_name='food_record_attendents')
+    food_items = models.JSONField(help_text="Array of food items", default=list)
+    food_time = models.CharField(max_length=20, choices=FOOD_TIME_CHOICES, blank=True, null=True)
+    added_by = models.ForeignKey('CrecheAttendant', on_delete=models.SET_NULL, null=True, blank=True, related_name='food_record_attendents')
+    food_update_date = models.DateTimeField(blank=True, null=True)
+    reason = models.TextField(blank=True, null=True, help_text="Reason for food record")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-food_update_date']
+        verbose_name = 'Food Record Attendent'
+        verbose_name_plural = 'Food Record Attendents'
+
+    def __str__(self):
+        return f"{self.creche.creche_name} - {self.food_update_date.date() if self.food_update_date else 'No date'}"    
 
 
 # -----------------------------
@@ -334,6 +369,9 @@ class ChildGrowthMonitoring(models.Model):
 
     height_cm = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
     weight_kg = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True)
+    
+    weight_pic = models.ImageField(upload_to='child_growth/', blank=True, null=True)
+    height_pic = models.ImageField(upload_to='child_growth/', blank=True, null=True)
 
     notes = models.TextField(blank=True, null=True)
 
