@@ -23,8 +23,21 @@ class MedicineEntryAPI(APIView):
     """
     API to record medicine stock entry/inward for a health center.
     
-    This creates/updates a weekly requisition, updates stock, 
-    and records stock transactions.
+    This processes medicines against an existing requisition from 
+    the `healthcenter_weeklymedicinerequisition` table. For each medicine,
+    it checks if the medicine_id exists in the 
+    `healthcenter_weeklymedicinerequisitiondetail` table linked to a 
+    SUBMITTED or APPROVED requisition. If found, it updates the 
+    requisition detail and fulfills the stock entry.
+    
+    Flow:
+      1. Looks for an existing SUBMITTED or APPROVED requisition for 
+         this health center
+      2. For each medicine, checks if it exists as a detail in that 
+         requisition
+      3. If found → updates the detail (available_stock_qty, etc.) and 
+         marks status to FULFILLED after all items are processed
+      4. If no existing requisition found → creates a new one (FULFILLED)
     
     Endpoint: POST /medicine/entry/
     
@@ -36,19 +49,20 @@ class MedicineEntryAPI(APIView):
         "medicines": [
             {
                 "medicine_id": 1,
-                "requested_qty": 50,
                 "received_qty": 50,
                 "remarks": "Weekly stock received"
             },
             {
                 "medicine_name": "Paracetamol",
-                "requested_qty": 30,
                 "received_qty": 30,
                 "unit_name": "Tablet",
                 "min_stock_level": 10
             }
         ]
     }
+    
+    Note: `requested_qty` is optional here. The API will use the 
+    `requested_qty` from the existing requisition detail if available.
     
     Medicine Resolution Logic (in order):
       1. If `medicine_id` is provided and exists → use it
@@ -65,6 +79,7 @@ class MedicineEntryAPI(APIView):
             "requisition_id": 1,
             "requisition_date": "2026-06-03",
             "status": "FULFILLED",
+            "requisition_matched": true,
             "medicines": [
                 {
                     "medicine_id": 1,
@@ -72,7 +87,8 @@ class MedicineEntryAPI(APIView):
                     "previous_stock": 10,
                     "received_qty": 50,
                     "current_stock": 60,
-                    "transaction_id": 5
+                    "transaction_id": 5,
+                    "requisition_detail_matched": true
                 }
             ]
         }
@@ -136,15 +152,30 @@ class MedicineEntryAPI(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
             # ============================================
-            # CREATE OR GET WEEKLY REQUISITION
+            # LOOK FOR EXISTING SUBMITTED/APPROVED REQUISITION
             # ============================================
-            requisition = WeeklyMedicineRequisition.objects.create(
+            # Try to find an existing requisition that is still open (SUBMITTED or APPROVED)
+            existing_requisition = WeeklyMedicineRequisition.objects.filter(
                 health_center=health_center,
-                nurse=nurse,
-                requisition_week_start=requisition_week_start or timezone.now().date(),
-                requisition_week_end=requisition_week_end or timezone.now().date(),
-                status='FULFILLED'
-            )
+                status__in=['SUBMITTED', 'APPROVED']
+            ).order_by('-requisition_date').first()
+
+            requisition_matched = existing_requisition is not None
+
+            if existing_requisition:
+                # Use the existing requisition
+                requisition = existing_requisition
+                logger.info(f"Found existing requisition #{requisition.id} (status: {requisition.status}) for health center {health_center.id}")
+            else:
+                # Create a new requisition with FULFILLED status
+                requisition = WeeklyMedicineRequisition.objects.create(
+                    health_center=health_center,
+                    nurse=nurse,
+                    requisition_week_start=requisition_week_start or timezone.now().date(),
+                    requisition_week_end=requisition_week_end or timezone.now().date(),
+                    status='FULFILLED'
+                )
+                logger.info(f"Created new requisition #{requisition.id} for health center {health_center.id}")
 
             # ============================================
             # PROCESS EACH MEDICINE
@@ -193,9 +224,13 @@ class MedicineEntryAPI(APIView):
 
                 # 3) If still not found and we have a name, create a new Medicine record
                 if not medicine and medicine_name:
+                    medicine_code = med_item.get('medicine_code')
+                    if not medicine_code or medicine_code.strip() == '':
+                        medicine_code = None
+                    
                     medicine = Medicine.objects.create(
                         medicine_name=medicine_name,
-                        medicine_code=med_item.get('medicine_code', ''),
+                        medicine_code=medicine_code,
                         unit_name=med_item.get('unit_name', 'Unit'),
                         min_stock_level=med_item.get('min_stock_level', 5),
                         is_active=True
@@ -206,26 +241,68 @@ class MedicineEntryAPI(APIView):
                 if not medicine:
                     continue
 
-                # Create requisition detail
-                WeeklyMedicineRequisitionDetail.objects.create(
-                    requisition=requisition,
-                    medicine=medicine,
-                    available_stock_qty=0,
-                    requested_qty=requested_qty,
-                    auto_low_stock_flag=False,
-                    remarks=remarks
-                )
+                # ------------------------------------------------------------
+                # VALIDATE RECEIVED QTY AGAINST MEDICINE MIN STOCK LEVEL
+                # ------------------------------------------------------------
+                if received_qty < medicine.min_stock_level:
+                    return Response({
+                        'status_code': 400,
+                        'message': f"received_qty ({received_qty}) must be greater than medicine min stock level ({medicine.min_stock_level}) for medicine '{medicine.medicine_name}'",
+                        'data': {
+                            'medicine_id': medicine.id,
+                            'medicine_name': medicine.medicine_name,
+                            'received_qty': received_qty,
+                            'min_stock_level': medicine.min_stock_level,
+                        }
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
-                # Get or create stock record
-                stock, created = HealthCenterMedicineStock.objects.get_or_create(
+                # Get current stock before entry
+                stock, stock_created = HealthCenterMedicineStock.objects.get_or_create(
                     health_center=health_center,
                     medicine=medicine,
                     defaults={'current_stock_qty': 0}
                 )
-
                 previous_stock = stock.current_stock_qty
-                stock.current_stock_qty += received_qty
-                stock.save()
+
+                # ------------------------------------------------------------
+                # CHECK IF MEDICINE EXISTS IN EXISTING REQUISITION DETAIL
+                # ------------------------------------------------------------
+                detail_matched = False
+                if existing_requisition:
+                    try:
+                        existing_detail = WeeklyMedicineRequisitionDetail.objects.get(
+                            requisition=existing_requisition,
+                            medicine=medicine
+                        )
+                        # Update existing detail with received quantities
+                        existing_detail.available_stock_qty = previous_stock
+                        if requested_qty > 0:
+                            existing_detail.requested_qty = requested_qty
+                        existing_detail.auto_low_stock_flag = (previous_stock < medicine.min_stock_level)
+                        if remarks:
+                            existing_detail.remarks = remarks
+                        existing_detail.save()
+                        detail_matched = True
+                        logger.info(f"Updated existing requisition detail for medicine #{medicine.id} in requisition #{existing_requisition.id}")
+                    except WeeklyMedicineRequisitionDetail.DoesNotExist:
+                        # Medicine not in existing requisition — will create a new detail
+                        pass
+
+                # If no existing detail was updated, create a new requisition detail
+                if not detail_matched:
+                    WeeklyMedicineRequisitionDetail.objects.create(
+                        requisition=requisition,
+                        medicine=medicine,
+                        available_stock_qty=previous_stock,
+                        requested_qty=requested_qty if requested_qty > 0 else received_qty,
+                        auto_low_stock_flag=(previous_stock < medicine.min_stock_level),
+                        remarks=remarks
+                    )
+
+                # Update stock
+                stock.current_stock_qty = previous_stock + received_qty
+                stock.last_updated_at = timezone.now()
+                stock.save(update_fields=['current_stock_qty', 'last_updated_at'])
 
                 # Create stock transaction
                 transaction_record = MedicineStockTransaction.objects.create(
@@ -246,11 +323,17 @@ class MedicineEntryAPI(APIView):
                     'received_qty': received_qty,
                     'current_stock': stock.current_stock_qty,
                     'transaction_id': transaction_record.id,
+                    'requisition_detail_matched': detail_matched,
                 })
 
             if not processed_medicines:
-                # No valid medicines processed, rollback via exception
                 raise ValueError("No valid medicines found to process entry")
+
+            # If we used an existing requisition, update its status to FULFILLED
+            if existing_requisition and existing_requisition.status != 'FULFILLED':
+                existing_requisition.status = 'FULFILLED'
+                existing_requisition.save(update_fields=['status'])
+                requisition.status = 'FULFILLED'
 
             return Response({
                 'status_code': 200,
@@ -259,6 +342,7 @@ class MedicineEntryAPI(APIView):
                     'requisition_id': requisition.id,
                     'requisition_date': requisition.requisition_date.isoformat(),
                     'status': requisition.status,
+                    'requisition_matched': requisition_matched,
                     'health_center_id': health_center.id,
                     'health_center_name': health_center.name,
                     'nurse_id': nurse.id,

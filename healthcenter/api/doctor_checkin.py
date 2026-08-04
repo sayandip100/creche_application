@@ -411,25 +411,65 @@ class DoctorCheckOutAPI(APIView):
                 radius_meters = float(health_center.geo_radius_meters)
                 geo_verified = distance <= radius_meters
             
+            # Check if 2-hour + 30 minute timer has expired (total 150 mins for auto-checkout)
+            timer_end = check_in.check_in_time + timedelta(minutes=150)
+            timer_expired = timezone.now() >= timer_end
+            
+            # Check if user provided the optional fields
+            user_provided_nurse = nurse_present is not None
+            user_provided_hygiene = hygiene_maintained is not None
+            user_provided_patients = patients_visited_today is not None
+            user_provided_any = user_provided_nurse or user_provided_hygiene or user_provided_patients
+            
+            # Set checkout_remarks only if timer expired AND user did NOT provide optional fields
+            checkout_remarks = None
+            timer_auto_logout = False
+            if timer_expired and not user_provided_any:
+                timer_auto_logout = True
+                checkout_remarks = "Doctor did not check out within the 2-hour 30-minute timer period - automatically marked as checked out"
+            
             # Calculate duration
             check_out_time = timezone.now()
             duration = (check_out_time - check_in.check_in_time).total_seconds() / 60
             
             # Parse optional fields
-            try:
-                nurse_present_bool = nurse_present in [True, 'true', 'True', '1', 1, 'Yes','yes'] if nurse_present else check_in.nurse_present
-            except:
-                nurse_present_bool = check_in.nurse_present
-            
-            try:
-                hygiene_maintained_bool = hygiene_maintained in [True, 'true', 'True', '1', 1] if hygiene_maintained else check_in.hygiene_maintained
-            except:
-                hygiene_maintained_bool = check_in.hygiene_maintained
-            
-            try:
-                patients_count = int(patients_visited_today) if patients_visited_today else check_in.patients_visited_today
-            except:
-                patients_count = check_in.patients_visited_today
+            if timer_auto_logout:
+                # Timer expired and user did NOT provide fields → set to None
+                nurse_present_bool = None
+                hygiene_maintained_bool = None
+                patients_count = None
+            elif timer_expired and user_provided_any:
+                # Timer expired but user DID provide fields → use provided values, no remarks
+                try:
+                    nurse_present_bool = nurse_present in [True, 'true', 'True', '1', 1, 'Yes','yes'] if nurse_present else check_in.nurse_present
+                except:
+                    nurse_present_bool = check_in.nurse_present
+                
+                try:
+                    hygiene_maintained_bool = hygiene_maintained in [True, 'true', 'True', '1', 1] if hygiene_maintained else check_in.hygiene_maintained
+                except:
+                    hygiene_maintained_bool = check_in.hygiene_maintained
+                
+                try:
+                    patients_count = int(patients_visited_today) if patients_visited_today else check_in.patients_visited_today
+                except:
+                    patients_count = check_in.patients_visited_today
+            else:
+                # Timer NOT expired → normal behavior
+                try:
+                    nurse_present_bool = nurse_present in [True, 'true', 'True', '1', 1, 'Yes','yes'] if nurse_present else check_in.nurse_present
+                except:
+                    nurse_present_bool = check_in.nurse_present
+                
+                try:
+                    hygiene_maintained_bool = hygiene_maintained in [True, 'true', 'True', '1', 1] if hygiene_maintained else check_in.hygiene_maintained
+                except:
+                    hygiene_maintained_bool = check_in.hygiene_maintained
+                
+                try:
+                    patients_count = int(patients_visited_today) if patients_visited_today else check_in.patients_visited_today
+                except:
+                    patients_count = check_in.patients_visited_today
             
             # Update check-in record
             check_in.check_out_time = check_out_time
@@ -442,6 +482,7 @@ class DoctorCheckOutAPI(APIView):
             check_in.nurse_present = nurse_present_bool
             check_in.hygiene_maintained = hygiene_maintained_bool
             check_in.patients_visited_today = patients_count
+            check_in.checkout_remarks = checkout_remarks
             check_in.save()
             
             return Response({

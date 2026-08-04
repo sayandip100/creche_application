@@ -108,7 +108,7 @@ class AddPatientAPI(APIView):
             )
             
             # Serialize the response
-            treatment_serializer = PatientTreatmentSerializer(patient_treatment)
+            treatment_serializer = PatientTreatmentSerializer(patient_treatment, context={'request': request})
             treatment_data = treatment_serializer.data
             
             return Response(
@@ -174,7 +174,7 @@ class PatientListAPI(APIView):
             queryset = queryset.order_by('-created_at')
             
             # Serialize
-            serializer = PatientTreatmentSerializer(queryset, many=True)
+            serializer = PatientTreatmentSerializer(queryset, many=True, context={'request': request})
             
             return Response(
                 {
@@ -213,7 +213,7 @@ class PatientListAPI(APIView):
             health_center_id = request.data.get('health_center_id')
             nurse_id = request.data.get('nurse_id')
             doctor_id = request.data.get('doctor_id')
-           
+            
             # Build query
             queryset = PatientTreatment.objects.all()
             
@@ -230,7 +230,7 @@ class PatientListAPI(APIView):
             queryset = queryset.order_by('-created_at')
             
             # Serialize
-            serializer = PatientTreatmentSerializer(queryset, many=True)
+            serializer = PatientTreatmentSerializer(queryset, many=True, context={'request': request})
             
             return Response(
                 {
@@ -263,7 +263,7 @@ class PatientDetailAPI(APIView):
     def get(self, request, patient_id):
         try:
             patient = PatientTreatment.objects.get(id=patient_id)
-            serializer = PatientTreatmentSerializer(patient)
+            serializer = PatientTreatmentSerializer(patient, context={'request': request})
             
             return Response(
                 {
@@ -330,7 +330,7 @@ class PatientDetailAPI(APIView):
                     )
             
             patient.save()
-            serializer = PatientTreatmentSerializer(patient)
+            serializer = PatientTreatmentSerializer(patient, context={'request': request})
             
             return Response(
                 {

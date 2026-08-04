@@ -368,3 +368,138 @@ class CheckInAPI(APIView):
         c = 2 * asin(sqrt(a))
         r = 6371000  # Radius of earth in meters
         return c * r
+
+
+class CheckInStatusAPI(APIView):
+    """
+    Check-In Status API for:
+      - Attendant / Super Attendant (creches)
+      - Nurse / Head Nurse (healthcenter)
+
+    Returns the current check-in status for the authenticated user.
+    If checked in, returns the check-in details and remaining time.
+
+    Endpoint: GET /check-in/status/
+
+    No request parameters needed - identifies user from auth token.
+
+    Response:
+    {
+        "status_code": 200,
+        "message": "success",
+        "data": {
+            "is_checked_in": true,
+            "role": "attendant|nurse",
+            "attendance_id": 123,
+            "person_name": "...",
+            "location_name": "...",
+            "check_in_time": "2025-05-27T10:30:00Z",
+            "face_verified": true,
+            "geo_verified": true
+        }
+    }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            today = timezone.now().date()
+
+            # Try to match user to CrecheAttendant profile
+            attendant_profile = CrecheAttendant.objects.filter(
+                user=request.user, is_active=True
+            ).first()
+
+            # Try to match user to Nurse profile
+            nurse_profile = Nurse.objects.filter(
+                user=request.user, is_active=True
+            ).first()
+
+            # Check attendant status
+            if attendant_profile:
+                attendance = AttendantAttendance.objects.filter(
+                    attendant=attendant_profile,
+                    attendance_date=today
+                ).first()
+
+                if attendance:
+                    return Response({
+                        "status_code": 200,
+                        "message": "success",
+                        "data": {
+                            "is_checked_in": True,
+                            "role": attendant_profile.role,
+                            "attendance_id": attendance.id,
+                            "person_name": attendant_profile.attendant_name or attendant_profile.user.username,
+                            "profile_id": attendant_profile.id,
+                            "location_name": attendance.creche.creche_name if attendance.creche else None,
+                            "check_in_time": attendance.check_in_time,
+                            "face_verified": True,
+                            "geo_verified": attendance.geo_verified,
+                            "remarks": attendance.remarks
+                        }
+                    }, status=status.HTTP_200_OK)
+
+                return Response({
+                    "status_code": 200,
+                    "message": "No active check-in found",
+                    "data": {
+                        "is_checked_in": False,
+                        "role": attendant_profile.role,
+                        "person_name": attendant_profile.attendant_name or attendant_profile.user.username,
+                        "attendance_id": None,
+                        "check_in_time": None
+                    }
+                }, status=status.HTTP_200_OK)
+
+            # Check nurse status
+            if nurse_profile:
+                attendance = NurseAttendance.objects.filter(
+                    nurse=nurse_profile,
+                    attendance_date=today
+                ).first()
+
+                if attendance:
+                    return Response({
+                        "status_code": 200,
+                        "message": "success",
+                        "data": {
+                            "is_checked_in": True,
+                            "role": nurse_profile.role,
+                            "attendance_id": attendance.id,
+                            "person_name": nurse_profile.nurse_name or nurse_profile.user.username,
+                            "profile_id": nurse_profile.id,
+                            "location_name": attendance.health_center.name if attendance.health_center else None,
+                            "check_in_time": attendance.check_in_time,
+                            "face_verified": True,
+                            "geo_verified": attendance.geo_verified,
+                            "remarks": attendance.remarks
+                        }
+                    }, status=status.HTTP_200_OK)
+
+                return Response({
+                    "status_code": 200,
+                    "message": "No active check-in found",
+                    "data": {
+                        "is_checked_in": False,
+                        "role": nurse_profile.role,
+                        "person_name": nurse_profile.nurse_name or nurse_profile.user.username,
+                        "attendance_id": None,
+                        "check_in_time": None
+                    }
+                }, status=status.HTTP_200_OK)
+
+            # No matching profile found
+            return Response({
+                "status_code": 403,
+                "message": "Access denied. User must be an attendant, super attendant, nurse, or head nurse.",
+                "data": {}
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        except Exception as e:
+            return Response({
+                "status_code": 500,
+                "message": f"Error: {str(e)}",
+                "data": {}
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

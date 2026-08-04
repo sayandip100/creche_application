@@ -263,12 +263,28 @@ class NurseAttendance(models.Model):
 
 
 # -----------------------------
+# Medicine Unit
+# -----------------------------
+class MedicineUnit(models.Model):
+    unit_name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        verbose_name = 'Medicine Unit'
+        verbose_name_plural = 'Medicine Units'
+        ordering = ['unit_name']
+
+    def __str__(self):
+        return self.unit_name
+
+
+# -----------------------------
 # Medicine Master
 # -----------------------------
 class Medicine(models.Model):
     medicine_name = models.CharField(max_length=200, unique=True)
     medicine_code = models.CharField(max_length=50, unique=True, null=True, blank=True)
 
+    unit = models.ForeignKey(MedicineUnit, on_delete=models.SET_NULL, null=True, blank=True, related_name='medicines')
     unit_name = models.CharField(max_length=50, default='Unit')
     min_stock_level = models.IntegerField(default=5)
 
@@ -306,6 +322,8 @@ class PatientTreatment(models.Model):
     symptoms = models.TextField(null=True, blank=True, help_text="Patient symptoms")
     diagnosis = models.TextField(null=True, blank=True, help_text="Diagnosis description")
     doctor_remarks = models.TextField(null=True, blank=True, help_text="Doctor's remarks/notes")
+    doctor_prescription = models.TextField(null=True, blank=True, help_text="Doctor's prescription details")
+    doctor_prescription_image = models.ImageField(upload_to='doctor_prescriptions/', null=True, blank=True, help_text="Doctor's prescription image/file")
     followup_date = models.DateField(null=True, blank=True, help_text="Recommended follow-up date")
 
     treatment_date = models.DateTimeField(auto_now_add=True)

@@ -56,25 +56,57 @@ class LoginAPI(APIView):
 
         refresh = RefreshToken.for_user(user)
         
-        # Get name based on role
+        # Get personal details based on role
         name = None
+        email = user.email or ''
+        mobile_no = None
+        address = None
+        qualification = None
+        specialization = None
+        attendant_obj = None
+        doctor_obj = None
+        nurse_obj = None
+
         if user.role in ['attendant', 'super_attendant']:
-            attendant = CrecheAttendant.objects.filter(user=user).first()
-            name = attendant.attendant_name if attendant else None
+            attendant_obj = CrecheAttendant.objects.filter(user=user).first()
+            if attendant_obj:
+                name = attendant_obj.attendant_name
+                mobile_no = attendant_obj.mobile_no
+                address = attendant_obj.address
         elif user.role == 'doctor':
-            doctor = Doctor.objects.filter(user=user).first()
-            name = doctor.name if doctor else None
+            doctor_obj = Doctor.objects.filter(user=user).first()
+            if doctor_obj:
+                name = doctor_obj.name
+                mobile_no = doctor_obj.mobile_no
+                qualification = doctor_obj.qualification
+                specialization = doctor_obj.specialization
         elif user.role in ['nurse', 'head_nurse']:
-            nurse = Nurse.objects.filter(user=user).first()
-            name = nurse.nurse_name if nurse else None
-        
+            nurse_obj = Nurse.objects.filter(user=user).first()
+            if nurse_obj:
+                name = nurse_obj.nurse_name
+                mobile_no = nurse_obj.mobile_no
+                qualification = nurse_obj.qualification
+
         # Main data structure
         data = {
             'user_id': user.id,
             'username': user.username,
+            'email': email,
             'role': user.role,
             'name': name,
         }
+
+        # Add role-specific profile details
+        if user.role in ['attendant', 'super_attendant']:
+            data['mobile_no'] = mobile_no
+            data['address'] = address
+        elif user.role == 'doctor':
+            data['mobile_no'] = mobile_no
+            data['qualification'] = qualification
+            data['specialization'] = specialization
+        elif user.role in ['nurse', 'head_nurse']:
+            data['mobile_no'] = mobile_no
+            data['qualification'] = qualification
 
         # -----------------------------
         # Helper: Get latest attendance for a child
@@ -467,6 +499,15 @@ class MobileLoginAPI(APIView):
                 if nurse.health_center:
                     tea_garden_id = nurse.health_center.tea_garden.id
 
+        # Get photo URL based on role (with full absolute URL including IP/domain)
+        photo_url = None
+        if user.role in ['attendant', 'super_attendant'] and attendant:
+            photo_url = request.build_absolute_uri(attendant.photo.url) if attendant.photo else None
+        elif user.role == 'doctor' and doctor:
+            photo_url = request.build_absolute_uri(doctor.photo.url) if doctor.photo else None
+        elif user.role in ['nurse', 'head_nurse'] and nurse:
+            photo_url = request.build_absolute_uri(nurse.photo.url) if nurse.photo else None
+
         # Build mobile response
         user_data = {
             'refresh_token': str(refresh),
@@ -474,10 +515,14 @@ class MobileLoginAPI(APIView):
             'username': user.username,
             'role': user.role,
             'name': name,
+            'photo_url': photo_url,
             'login_time': login_time.isoformat(),
             'tea_garden_id': tea_garden_id,
+            'tea_garden_name': attendant.creche.tea_garden.tea_garden_name if attendant and attendant.creche and attendant.creche.tea_garden else (doctor.health_center.tea_garden.tea_garden_name if doctor and doctor.health_center and doctor.health_center.tea_garden else (nurse.health_center.tea_garden.tea_garden_name if nurse and nurse.health_center and nurse.health_center.tea_garden else None)),
             'creache_id': attendant.creche.id if attendant and attendant.creche else None,
+            'creche_name': attendant.creche.creche_name if attendant and attendant.creche else None,
             'health_center_id': doctor.health_center.id if doctor and doctor.health_center else (nurse.health_center.id if nurse and nurse.health_center else None),
+            'health_center_name': doctor.health_center.name if doctor and doctor.health_center else (nurse.health_center.name if nurse and nurse.health_center else None),
             'attendant_id': attendant.id if attendant else None,
             'doctor_id': doctor.id if doctor else None,
             'nurse_id': nurse.id if nurse else None,
@@ -490,7 +535,7 @@ class MobileLoginAPI(APIView):
                 'access_token': access_token,
                 'refresh_token': str(refresh),
                 'token_type': 'Bearer',
-                'expires_in': 300,  # 5 minutes
+                'expires_in': 60,  # 5 minutes
                 'user_data': user_data
             }
         }, status=status.HTTP_200_OK)
@@ -921,14 +966,41 @@ class ChildRegisterAPI(APIView):
             
             if embedding_response.status_code != 200:
                 print(f"[DEBUG] API returned non-200 status: {embedding_response.status_code}")
+                # Try to parse the response body for a detail message
+                try:
+                    error_body = embedding_response.json()
+                    detail_msg = error_body.get('detail', {})
+                    if isinstance(detail_msg, dict):
+                        error_message = detail_msg.get('message', embedding_response.text)
+                    else:
+                        error_message = str(detail_msg)
+                except Exception:
+                    error_message = embedding_response.text
+                
                 return Response({
                     "status_code": 400,
-                    "message": "Embedding generation failed",
+                    "message": error_message,
                     "error": f"API returned {embedding_response.status_code}",
                     "details": embedding_response.text
                 }, status=200)
             
             embeddings_response = embedding_response.json()
+            
+            # Check if the response contains a detail message (e.g. face already registered)
+            response_detail = embeddings_response.get('detail')
+            if response_detail:
+                if isinstance(response_detail, dict):
+                    detail_message = response_detail.get('message', '')
+                else:
+                    detail_message = str(response_detail)
+                if detail_message:
+                    return Response({
+                        "status_code": 400,
+                        "message": detail_message,
+                        "error": detail_message,
+                        "details": embedding_response.text
+                    }, status=200)
+            
             embeddings_list = embeddings_response.get('embeddings', [])
             embeddings_count = len(embeddings_list)
             
