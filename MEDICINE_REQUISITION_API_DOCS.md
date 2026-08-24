@@ -239,9 +239,11 @@ POST /medicine/requisition/list/
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `health_center_id` | Integer | Yes | ID of the health center |
-| `status` | String | No | Filter by status: `DRAFT`, `SUBMITTED`, `APPROVED`, `REJECTED`, `FULFILLED` |
-| `start_date` | Date (YYYY-MM-DD) | No | Filter by requisition week start date (>=) |
-| `end_date` | Date (YYYY-MM-DD) | No | Filter by requisition week end date (<=) |
+| `status` | String | No | Filter by status: `DRAFT`, `SUBMITTED`, `APPROVED`, `REJECTED`, `FULFILLED` (null/empty = all) |
+| `start_date` | Date (YYYY-MM-DD) | No | Filter by `requisition_date` (>=) from the `healthcenter_weeklymedicinerequisition` table |
+| `end_date` | Date (YYYY-MM-DD) | No | Filter by `requisition_date` (<=) from the `healthcenter_weeklymedicinerequisition` table |
+
+> **Note:** Date filtering is based on the `requisition_date` column of the `healthcenter_weeklymedicinerequisition` table, **not** the week start/end dates. If `status` is null/empty, all requisitions between `start_date` and `end_date` are returned. If `status` is provided, only matching status is returned.
 
 ### cURL Example
 ```bash

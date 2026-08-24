@@ -1,0 +1,2096 @@
+openapi: 3.0.0
+info:
+  title: Creche App API
+  description: |
+    Complete API documentation for the Creche App - covering authentication,
+    attendance, reports, health center management, prescriptions, and more.
+  version: 1.0.0
+  contact:
+    name: Creche App Team
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        status_code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        data:
+          type: object
+
+    MobileLoginResponse:
+      type: object
+      properties:
+        status_code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            access_token:
+              type: string
+            refresh_token:
+              type: string
+            token_type:
+              type: string
+            expires_in:
+              type: integer
+            user_data:
+              type: object
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+
+    RefreshTokenResponse:
+      type: object
+      properties:
+        status_code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            access_token:
+              type: string
+            refresh_token:
+              type: string
+
+    RegisterAttendantRequest:
+      type: object
+      required:
+        - username
+        - password
+        - role
+        - attendant_name
+        - tea_garden_id
+        - creche_id
+        - photo
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [attendant, super_attendant]
+        attendant_name:
+          type: string
+        mobile_no:
+          type: string
+        address:
+          type: string
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+        photo:
+          type: string
+          format: binary
+
+    RegisterDoctorRequest:
+      type: object
+      required:
+        - username
+        - password
+        - role
+        - doctor_name
+        - tea_garden_id
+        - health_center_id
+        - photo
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [doctor]
+        doctor_name:
+          type: string
+        specialization:
+          type: string
+        qualification:
+          type: string
+        mobile_no:
+          type: string
+        tea_garden_id:
+          type: integer
+        health_center_id:
+          type: integer
+        photo:
+          type: string
+          format: binary
+
+    RegisterNurseRequest:
+      type: object
+      required:
+        - username
+        - password
+        - role
+        - nurse_name
+        - tea_garden_id
+        - health_center_id
+        - photo
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [nurse, head_nurse]
+        nurse_name:
+          type: string
+        qualification:
+          type: string
+        mobile_no:
+          type: string
+        tea_garden_id:
+          type: integer
+        health_center_id:
+          type: integer
+        photo:
+          type: string
+          format: binary
+
+    RegisterChildRequest:
+      type: object
+      required:
+        - creche_id
+        - name
+        - photos
+      properties:
+        creche_id:
+          type: integer
+        name:
+          type: string
+        photos:
+          type: array
+          items:
+            type: string
+            format: binary
+        photo:
+          type: string
+          format: binary
+        age_years:
+          type: integer
+        gender:
+          type: string
+          enum: [M, F]
+        height_cm:
+          type: number
+        weight_kg:
+          type: number
+        guardian_name:
+          type: string
+        contact_person_name:
+          type: string
+        contact_phone:
+          type: string
+        address:
+          type: string
+
+    ChildListRequest:
+      type: object
+      required:
+        - tea_garden_id
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+
+    CreateCrecheRequest:
+      type: object
+      required:
+        - creche_name
+        - creche_code
+        - tea_garden_id
+      properties:
+        creche_name:
+          type: string
+        creche_code:
+          type: string
+        tea_garden_id:
+          type: integer
+        location:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        geo_radius_meters:
+          type: number
+
+    ChildAttendanceReportRequest:
+      type: object
+      required:
+        - tea_garden_id
+        - creche_id
+        - end_date
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+        end_date:
+          type: string
+          format: date
+        report_format:
+          type: string
+          enum: [datewise, childwise]
+          default: datewise
+
+    FoodMonitoringReportRequest:
+      type: object
+      required:
+        - tea_garden_id
+        - creche_id
+        - start_date
+        - end_date
+        - entered_by_id
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        entered_by_id:
+          type: integer
+
+    StoreFoodMonitoringRequest:
+      type: object
+      required:
+        - food_image
+        - creche_id
+      properties:
+        food_image:
+          type: string
+          format: binary
+        creche_id:
+          type: integer
+        meal_type:
+          type: string
+          default: Lunch
+        food_date:
+          type: string
+          format: date
+        entered_by_id:
+          type: integer
+
+    FoodRecordCreateRequest:
+      type: object
+      required:
+        - creche_id
+        - food_items
+      properties:
+        creche_id:
+          type: integer
+        food_items:
+          type: array
+          items:
+            type: string
+        food_time:
+          type: string
+          enum: [breakfast, lunch, dinner]
+        added_by_id:
+          type: integer
+
+    FoodRecordAttendentUpdateRequest:
+      type: object
+      required:
+        - creche_id
+        - food_items
+      properties:
+        creche_id:
+          type: integer
+        food_items:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        added_by_id:
+          type: integer
+        food_time:
+          type: string
+          enum: [breakfast, lunch, dinner]
+
+    FoodRecordAttendentListRequest:
+      type: object
+      required:
+        - start_date
+        - end_date
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        creche_id:
+          type: integer
+        food_time:
+          type: string
+          enum: [breakfast, lunch, dinner]
+
+    TeaGardenIdRequest:
+      type: object
+      required:
+        - tea_garden_id
+      properties:
+        tea_garden_id:
+          type: integer
+
+    AttendantAttendanceReportRequest:
+      type: object
+      required:
+        - tea_garden_id
+        - creche_id
+        - start_date
+        - end_date
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+
+    CrecheChildDetailsRequest:
+      type: object
+      required:
+        - creche_id
+        - child_id
+      properties:
+        creche_id:
+          type: integer
+        child_id:
+          type: integer
+
+    AttendantDetailsRequest:
+      type: object
+      required:
+        - creche_id
+        - attendant_id
+      properties:
+        creche_id:
+          type: integer
+        attendant_id:
+          type: integer
+
+    CrecheDetailsRequest:
+      type: object
+      required:
+        - tea_garden_id
+        - creche_id
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+
+    HealthCenterDetailsRequest:
+      type: object
+      required:
+        - teagarden_id
+        - healthcenter_id
+      properties:
+        teagarden_id:
+          type: integer
+        healthcenter_id:
+          type: integer
+
+    MarkAttendanceRequest:
+      type: object
+      required:
+        - file
+        - creche_id
+        - marked_by_id
+      properties:
+        file:
+          type: string
+          format: binary
+        creche_id:
+          type: integer
+        marked_by_id:
+          type: integer
+
+    MarkIndividualAttendanceRequest:
+      type: object
+      required:
+        - child_id
+      properties:
+        child_id:
+          oneOf:
+            - type: integer
+            - type: array
+              items:
+                type: integer
+        creche_id:
+          type: integer
+        attendance_status:
+          type: string
+          enum: [PRESENT, ABSENT]
+          default: PRESENT
+        marked_by_id:
+          type: integer
+
+    DetectChildrenRequest:
+      type: object
+      required:
+        - file
+        - creche_id
+      properties:
+        file:
+          type: string
+          format: binary
+        creche_id:
+          type: integer
+        marked_by_id:
+          type: integer
+
+    ChildGrowthCreateRequest:
+      type: object
+      required:
+        - child_id
+      properties:
+        child_id:
+          type: integer
+        height_cm:
+          type: number
+        weight_kg:
+          type: number
+        notes:
+          type: string
+        weight_pic:
+          type: string
+          format: binary
+        height_pic:
+          type: string
+          format: binary
+
+    AddPatientRequest:
+      type: object
+      required:
+        - patient_name
+        - health_center_id
+      properties:
+        patient_name:
+          type: string
+        age:
+          type: integer
+        contact_number:
+          type: string
+        health_center_id:
+          type: integer
+        nurse_id:
+          type: integer
+        doctor_id:
+          type: integer
+        status:
+          type: integer
+          default: 1
+        remarks:
+          type: string
+
+    PatientListRequest:
+      type: object
+      properties:
+        health_center_id:
+          type: integer
+        nurse_id:
+          type: integer
+        doctor_id:
+          type: integer
+
+    UpdatePatientRequest:
+      type: object
+      properties:
+        patient_name:
+          type: string
+        age:
+          type: integer
+        contact_number:
+          type: string
+        status:
+          type: integer
+        remarks:
+          type: string
+        nurse_id:
+          type: integer
+        doctor_id:
+          type: integer
+
+    DoctorCheckInRequest:
+      type: object
+      required:
+        - photo
+        - latitude
+        - longitude
+        - health_center_id
+      properties:
+        photo:
+          type: string
+          format: binary
+        latitude:
+          type: number
+        longitude:
+          type: number
+        health_center_id:
+          type: integer
+        attendance_date:
+          type: string
+          format: date
+        nurse_present:
+          type: boolean
+        hygiene_maintained:
+          type: boolean
+        patients_visited_today:
+          type: integer
+
+    DoctorCheckOutRequest:
+      type: object
+      required:
+        - check_in_id
+        - photo
+        - latitude
+        - longitude
+      properties:
+        check_in_id:
+          type: integer
+        photo:
+          type: string
+          format: binary
+        latitude:
+          type: number
+        longitude:
+          type: number
+        nurse_present:
+          type: boolean
+        hygiene_maintained:
+          type: boolean
+        patients_visited_today:
+          type: integer
+
+    DoctorListRequest:
+      type: object
+      required:
+        - health_center_id
+      properties:
+        health_center_id:
+          type: integer
+        is_active:
+          type: boolean
+
+    GeneratePrescriptionRequest:
+      type: object
+      required:
+        - health_center_id
+        - nurse_id
+        - doctor_id
+        - patient_treatment_id
+        - medicines
+        - doctor_remarks
+        - doctor_prescription_image
+      properties:
+        health_center_id:
+          type: integer
+        nurse_id:
+          type: integer
+        doctor_id:
+          type: integer
+        patient_treatment_id:
+          type: integer
+        medicines:
+          type: string
+          description: JSON array string of medicine IDs and quantities
+        doctor_remarks:
+          type: string
+        doctor_prescription_image:
+          type: string
+          format: binary
+        send_whatsapp:
+          type: boolean
+          default: true
+
+    MedicineListRequest:
+      type: object
+      required:
+        - health_center_id
+      properties:
+        health_center_id:
+          type: integer
+
+    MedicineEntryRequest:
+      type: object
+      required:
+        - health_center_id
+        - nurse_id
+        - medicines
+      properties:
+        health_center_id:
+          type: integer
+        nurse_id:
+          type: integer
+        requisition_week_start:
+          type: string
+          format: date
+        requisition_week_end:
+          type: string
+          format: date
+        medicines:
+          type: array
+          items:
+            type: object
+            properties:
+              medicine_id:
+                type: integer
+              medicine_name:
+                type: string
+              received_qty:
+                type: integer
+              requested_qty:
+                type: integer
+              unit_name:
+                type: string
+              min_stock_level:
+                type: integer
+              remarks:
+                type: string
+
+    MedicineUnitCreateRequest:
+      type: object
+      required:
+        - unit_name
+      properties:
+        unit_name:
+          type: string
+
+    MedicineMinStockUpdateRequest:
+      type: object
+      properties:
+        medicine_id:
+          type: integer
+        medicine_name:
+          type: string
+        medicine_code:
+          type: string
+        unit_name:
+          type: string
+        min_stock_level:
+          type: integer
+        medicines:
+          type: array
+          items:
+            type: object
+            properties:
+              medicine_id:
+                type: integer
+              medicine_name:
+                type: string
+              medicine_code:
+                type: string
+              unit_name:
+                type: string
+              min_stock_level:
+                type: integer
+
+    MedicineRequisitionCreateRequest:
+      type: object
+      required:
+        - health_center_id
+        - nurse_id
+        - medicines
+      properties:
+        health_center_id:
+          type: integer
+        nurse_id:
+          type: integer
+        requisition_week_start:
+          type: string
+          format: date
+        requisition_week_end:
+          type: string
+          format: date
+        medicines:
+          type: array
+          items:
+            type: object
+            properties:
+              medicine_id:
+                type: integer
+              medicine_name:
+                type: string
+              requested_qty:
+                type: integer
+              unit_name:
+                type: string
+              min_stock_level:
+                type: integer
+              remarks:
+                type: string
+        remarks:
+          type: string
+
+    MedicineRequisitionListRequest:
+      type: object
+      required:
+        - health_center_id
+      properties:
+        health_center_id:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, FULFILLED]
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+
+    MedicineRequisitionDetailRequest:
+      type: object
+      required:
+        - requisition_id
+      properties:
+        requisition_id:
+          type: integer
+
+    MedicineRequisitionStatusUpdateRequest:
+      type: object
+      required:
+        - requisition_id
+        - status
+      properties:
+        requisition_id:
+          type: integer
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED, APPROVED, REJECTED, FULFILLED]
+        remarks:
+          type: string
+
+    CheckInRequest:
+      type: object
+      required:
+        - file
+        - latitude
+        - longitude
+      properties:
+        file:
+          type: string
+          format: binary
+        latitude:
+          type: number
+        longitude:
+          type: number
+        creche_id:
+          type: integer
+          description: Required for attendant/super_attendant
+        health_center_id:
+          type: integer
+          description: Required for nurse/head_nurse
+
+    AttendantListRequest:
+      type: object
+      required:
+        - tea_garden_id
+      properties:
+        tea_garden_id:
+          type: integer
+        creche_id:
+          type: integer
+
+    NurseListRequest:
+      type: object
+      required:
+        - tea_garden_id
+      properties:
+        tea_garden_id:
+          type: integer
+        health_center_id:
+          type: integer
+
+    PromoteToSuperRequest:
+      type: object
+      properties:
+        attendant_id:
+          type: integer
+        nurse_id:
+          type: integer
+
+paths:
+  # ============================================
+  # AUTHENTICATION
+  # ============================================
+  /login/:
+    post:
+      tags: [Authentication]
+      summary: Login
+      description: Authenticate user and get JWT access token with role-based data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+
+  /mobile-login/:
+    post:
+      tags: [Authentication]
+      summary: Mobile Login
+      description: Simplified login for mobile clients with role-specific IDs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MobileLoginResponse'
+
+  /getrefreshtoken/:
+    post:
+      tags: [Authentication]
+      summary: Get Refresh Token
+      description: Refresh an expired access token using a valid refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+        '400':
+          description: Invalid token type or missing refresh_token
+        '401':
+          description: Invalid or expired refresh token
+
+  /logout/:
+    post:
+      tags: [Authentication]
+      summary: Logout
+      description: Stateless JWT logout - client should delete stored tokens
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successfully logged out
+
+  /register/:
+    post:
+      tags: [Authentication]
+      summary: Register Attendant / Doctor / Nurse
+      description: Register a new user with photo for face embedding
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/RegisterAttendantRequest'
+                - $ref: '#/components/schemas/RegisterDoctorRequest'
+                - $ref: '#/components/schemas/RegisterNurseRequest'
+      responses:
+        '201':
+          description: User registered successfully
+        '400':
+          description: Validation error or embedding generation failed
+
+  /childrenregister/:
+    post:
+      tags: [Authentication]
+      summary: Register Child
+      description: Register a new child with photos for face embedding
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RegisterChildRequest'
+      responses:
+        '200':
+          description: Child registered successfully
+        '400':
+          description: Validation error or embedding generation failed
+
+  /children/list/:
+    post:
+      tags: [Authentication]
+      summary: Child List
+      description: List children by tea garden and optionally creche
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChildListRequest'
+      responses:
+        '200':
+          description: Children retrieved successfully
+
+  /creches/create/:
+    post:
+      tags: [Authentication]
+      summary: Create Creche
+      description: Create a new creche
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCrecheRequest'
+      responses:
+        '201':
+          description: Creche created successfully
+
+  # ============================================
+  # REPORTS
+  # ============================================
+  /reports/child-attendance/:
+    post:
+      tags: [Reports]
+      summary: Child Attendance Report
+      description: Get child attendance report (datewise or childwise)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChildAttendanceReportRequest'
+      responses:
+        '200':
+          description: Report generated successfully
+        '400':
+          description: Missing required fields or invalid date format
+        '404':
+          description: Invalid tea garden or creche
+
+  /reports/food-monitoring/:
+    post:
+      tags: [Reports]
+      summary: Food Monitoring Report
+      description: Get food monitoring report with nutrition grading and insights
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodMonitoringReportRequest'
+      responses:
+        '200':
+          description: Report generated successfully
+        '400':
+          description: Missing required fields or invalid date format
+        '404':
+          description: Invalid creche or tea garden
+
+  /reports/food-monitoring/store/:
+    post:
+      tags: [Reports]
+      summary: Store Food Monitoring
+      description: Store food monitoring data by calling external API
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StoreFoodMonitoringRequest'
+      responses:
+        '200':
+          description: Food monitoring data stored successfully
+        '409':
+          description: Food monitoring data already exists for this date/meal
+
+  /food-record/create/:
+    post:
+      tags: [Reports]
+      summary: Create Food Record
+      description: Create a food record in the food record table
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodRecordCreateRequest'
+      responses:
+        '200':
+          description: Food record created successfully
+        '400':
+          description: Validation error
+
+  /food-record-attendent/update/:
+    post:
+      tags: [Reports]
+      summary: Update Food Record Attendant
+      description: Insert food record data into food record attendant table
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodRecordAttendentUpdateRequest'
+      responses:
+        '200':
+          description: Food record attendent created successfully
+        '400':
+          description: Validation error
+
+  /food-record-attendent/list/:
+    post:
+      tags: [Reports]
+      summary: List Food Record Attendant
+      description: List food record attendant data date-wise
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoodRecordAttendentListRequest'
+      responses:
+        '200':
+          description: Food records retrieved successfully
+        '400':
+          description: Missing required fields or invalid date format
+
+  /reports/crechelist/:
+    post:
+      tags: [Reports]
+      summary: Creche List
+      description: List creches by tea garden
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeaGardenIdRequest'
+      responses:
+        '200':
+          description: Creches retrieved successfully
+        '400':
+          description: tea_garden_id is required
+
+  /reports/healthcenterlist/:
+    post:
+      tags: [Reports]
+      summary: Health Center List
+      description: List health centers by tea garden
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeaGardenIdRequest'
+      responses:
+        '200':
+          description: Health centers retrieved successfully
+        '400':
+          description: tea_garden_id is required
+
+  /reports/teagardenlist/:
+    get:
+      tags: [Reports]
+      summary: Tea Garden List
+      description: List all tea gardens
+      responses:
+        '200':
+          description: Tea gardens retrieved successfully
+
+  /reports/attendant-attendance/:
+    post:
+      tags: [Reports]
+      summary: Attendant Attendance Report
+      description: Get attendant attendance report for a creche
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendantAttendanceReportRequest'
+      responses:
+        '200':
+          description: Report generated successfully
+        '400':
+          description: Missing required fields or invalid date format
+        '404':
+          description: Invalid creche or tea garden
+
+  /reports/children/:
+    post:
+      tags: [Reports]
+      summary: Creche Child Details
+      description: Get detailed information about a child in a creche
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrecheChildDetailsRequest'
+      responses:
+        '200':
+          description: Child details retrieved successfully
+        '404':
+          description: Creche or child not found
+
+  /reports/attendant/details/:
+    post:
+      tags: [Reports]
+      summary: Attendant Details
+      description: Get detailed information about an attendant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendantDetailsRequest'
+      responses:
+        '200':
+          description: Attendant details retrieved successfully
+        '404':
+          description: Creche or attendant not found
+
+  /reports/crechedetails/:
+    post:
+      tags: [Reports]
+      summary: Creche Details
+      description: Get detailed information about a creche
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CrecheDetailsRequest'
+      responses:
+        '200':
+          description: Creche details retrieved successfully
+        '404':
+          description: Creche or tea garden not found
+
+  /reports/healthcenter/details/:
+    post:
+      tags: [Reports]
+      summary: Health Center Details
+      description: Get detailed information about a health center including medicine reports
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthCenterDetailsRequest'
+      responses:
+        '200':
+          description: Health center details retrieved successfully
+        '404':
+          description: Health center or tea garden not found
+
+  # ============================================
+  # CHILD ATTENDANCE
+  # ============================================
+  /attendance/mark/:
+    post:
+      tags: [Child Attendance]
+      summary: Mark Attendance (Group Photo)
+      description: Mark attendance for all children using a group photo with face recognition
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MarkAttendanceRequest'
+      responses:
+        '200':
+          description: Attendance marked successfully
+
+  /attendance/mark-individual/:
+    post:
+      tags: [Child Attendance]
+      summary: Mark Individual Child Attendance
+      description: Mark individual child attendance as PRESENT or ABSENT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkIndividualAttendanceRequest'
+      responses:
+        '200':
+          description: Attendance marked successfully
+        '400':
+          description: Validation error
+        '404':
+          description: No valid children found
+
+  /attendance/detect-children/:
+    post:
+      tags: [Child Attendance]
+      summary: Detect Children From Photo
+      description: Detect children from a photo without updating the database
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DetectChildrenRequest'
+      responses:
+        '200':
+          description: Detection successful
+
+  /attendance/by-date/:
+    get:
+      tags: [Child Attendance]
+      summary: Get Attendance By Date
+      description: Get attendance for a creche on a specific date
+      parameters:
+        - name: creche_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Attendance retrieved successfully
+        '400':
+          description: Missing required query params
+        '404':
+          description: Creche not found
+
+  /attendance/child-history/:
+    get:
+      tags: [Child Attendance]
+      summary: Child Attendance History
+      description: Get attendance history for a specific child
+      parameters:
+        - name: child_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Attendance history retrieved successfully
+        '400':
+          description: child_id is required
+        '404':
+          description: Child not found
+
+  /attendance/date-range/:
+    get:
+      tags: [Child Attendance]
+      summary: Attendance By Date Range
+      description: Get attendance summary for a creche over a date range
+      parameters:
+        - name: creche_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Attendance summary retrieved successfully
+        '400':
+          description: Missing required query params
+        '404':
+          description: Creche not found
+
+  # ============================================
+  # CHILD GROWTH MONITORING
+  # ============================================
+  /child-growth/create/:
+    post:
+      tags: [Child Growth]
+      summary: Create / Update Child Growth
+      description: Create or update a child growth monitoring record
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChildGrowthCreateRequest'
+      responses:
+        '200':
+          description: Growth monitoring record saved successfully
+        '400':
+          description: child_id is required
+        '404':
+          description: Child not found
+
+  /child-growth/history/:
+    get:
+      tags: [Child Growth]
+      summary: Child Growth History
+      description: Get growth monitoring history for a specific child
+      parameters:
+        - name: child_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Growth history retrieved successfully
+        '400':
+          description: child_id is required
+        '404':
+          description: Child not found
+
+  /child-growth/detail/:
+    get:
+      tags: [Child Growth]
+      summary: Child Growth Detail
+      description: Get a single growth monitoring record by its ID
+      parameters:
+        - name: record_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Growth record retrieved successfully
+        '400':
+          description: record_id is required
+        '404':
+          description: Growth monitoring record not found
+
+  /child-growth/delete/:
+    delete:
+      tags: [Child Growth]
+      summary: Delete Child Growth
+      description: Delete a growth monitoring record by its ID
+      parameters:
+        - name: record_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Growth monitoring record deleted successfully
+        '400':
+          description: record_id is required
+        '404':
+          description: Growth monitoring record not found
+
+  /child-growth/date-range/:
+    get:
+      tags: [Child Growth]
+      summary: Child Growth By Date Range
+      description: Get growth monitoring records for a child within a date range
+      parameters:
+        - name: child_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Growth records retrieved successfully
+        '400':
+          description: Missing required query params
+        '404':
+          description: Child not found
+
+  # ============================================
+  # PATIENT MANAGEMENT
+  # ============================================
+  /patient/add/:
+    post:
+      tags: [Patient]
+      summary: Add Patient
+      description: Add a new patient treatment record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPatientRequest'
+      responses:
+        '201':
+          description: Patient added successfully
+        '400':
+          description: Validation failed
+        '404':
+          description: Health center, nurse, or doctor not found
+
+  /patient/list/:
+    get:
+      tags: [Patient]
+      summary: Patient List (GET)
+      description: List patients with optional filters via query params
+      parameters:
+        - name: health_center_id
+          in: query
+          schema:
+            type: integer
+        - name: nurse_id
+          in: query
+          schema:
+            type: integer
+        - name: doctor_id
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Patients retrieved successfully
+    post:
+      tags: [Patient]
+      summary: Patient List (POST)
+      description: List patients with optional filters via request body
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientListRequest'
+      responses:
+        '200':
+          description: Patients retrieved successfully
+
+  /patient/{patient_id}/:
+    get:
+      tags: [Patient]
+      summary: Patient Detail
+      description: Get details of a specific patient
+      parameters:
+        - name: patient_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Patient retrieved successfully
+        '404':
+          description: Patient not found
+    put:
+      tags: [Patient]
+      summary: Update Patient
+      description: Update a patient's information
+      parameters:
+        - name: patient_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatientRequest'
+      responses:
+        '200':
+          description: Patient updated successfully
+        '404':
+          description: Patient not found
+    delete:
+      tags: [Patient]
+      summary: Delete Patient
+      description: Delete a patient record
+      parameters:
+        - name: patient_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Patient deleted successfully
+        '404':
+          description: Patient not found
+
+  # ============================================
+  # DOCTOR CHECK-IN / CHECK-OUT
+  # ============================================
+  /doctor/check-in/:
+    post:
+      tags: [Doctor Check-In]
+      summary: Doctor Check-In
+      description: Doctor check-in with face verification and GPS location
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DoctorCheckInRequest'
+      responses:
+        '200':
+          description: Check-in successful
+        '401':
+          description: Face verification failed
+        '403':
+          description: Only doctors can check in
+        '409':
+          description: Doctor already checked in today
+
+  /doctor/check-out/:
+    post:
+      tags: [Doctor Check-In]
+      summary: Doctor Check-Out
+      description: Doctor check-out with photo and GPS location
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DoctorCheckOutRequest'
+      responses:
+        '200':
+          description: Check-out successful
+        '403':
+          description: Only doctors can check out
+        '404':
+          description: Check-in record not found
+        '409':
+          description: Doctor already checked out
+
+  /doctor/check-in/status/:
+    get:
+      tags: [Doctor Check-In]
+      summary: Doctor Check-In Status
+      description: Get current check-in status for the authenticated doctor
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Check-in status retrieved successfully
+        '403':
+          description: Only doctors can access check-in status
+
+  # ============================================
+  # DOCTOR LIST
+  # ============================================
+  /doctors/list/:
+    post:
+      tags: [Doctor]
+      summary: Doctor List
+      description: List doctors by health center
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DoctorListRequest'
+      responses:
+        '200':
+          description: Doctors retrieved successfully
+        '400':
+          description: health_center_id is required
+        '404':
+          description: Health center not found
+
+  /doctor/{doctor_id}/:
+    get:
+      tags: [Doctor]
+      summary: Doctor Detail
+      description: Get details of a specific doctor
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: doctor_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Doctor retrieved successfully
+        '404':
+          description: Doctor not found
+
+  # ============================================
+  # E-PRESCRIPTION & MEDICINE
+  # ============================================
+  /prescription/generate/:
+    post:
+      tags: [Prescription]
+      summary: Generate Prescription
+      description: Generate a professional e-Prescription PDF and send via WhatsApp
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GeneratePrescriptionRequest'
+      responses:
+        '200':
+          description: Prescription generated successfully
+        '400':
+          description: Missing required fields or invalid medicines
+        '404':
+          description: Health center, nurse, doctor, or treatment not found
+
+  /medicine/list/:
+    post:
+      tags: [Prescription]
+      summary: Medicine List
+      description: List all active medicines with stock at a health center
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineListRequest'
+      responses:
+        '200':
+          description: Medicines fetched successfully
+        '400':
+          description: health_center_id is required
+        '404':
+          description: Health center not found
+
+  /medicine/entry/:
+    post:
+      tags: [Prescription]
+      summary: Medicine Entry (Stock Inward)
+      description: Record medicine stock entry/inward for a health center
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineEntryRequest'
+      responses:
+        '200':
+          description: Medicine entry recorded successfully
+        '400':
+          description: Validation error or received_qty below min stock level
+        '404':
+          description: Health center or nurse not found
+
+  /medicine/{medicine_id}/:
+    get:
+      tags: [Prescription]
+      summary: Medicine Detail
+      description: Get details of a specific medicine including stock across all centers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Medicine details fetched
+        '404':
+          description: Medicine not found
+
+  # ============================================
+  # MEDICINE UNITS
+  # ============================================
+  /medicine/units/:
+    get:
+      tags: [Medicine Units]
+      summary: Medicine Unit List
+      description: List all medicine units
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Medicine units retrieved successfully
+    post:
+      tags: [Medicine Units]
+      summary: Create Medicine Unit
+      description: Create a new medicine unit
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineUnitCreateRequest'
+      responses:
+        '201':
+          description: Medicine unit created successfully
+        '400':
+          description: Validation error
+
+  /medicine/units/{unit_id}/:
+    get:
+      tags: [Medicine Units]
+      summary: Medicine Unit Detail
+      description: Get details of a specific medicine unit
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unit_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Medicine unit retrieved successfully
+        '404':
+          description: Medicine unit not found
+    put:
+      tags: [Medicine Units]
+      summary: Update Medicine Unit
+      description: Update a medicine unit
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unit_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineUnitCreateRequest'
+      responses:
+        '200':
+          description: Medicine unit updated successfully
+        '400':
+          description: Validation error
+        '404':
+          description: Medicine unit not found
+    delete:
+      tags: [Medicine Units]
+      summary: Delete Medicine Unit
+      description: Delete a medicine unit
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: unit_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Medicine unit deleted successfully
+        '404':
+          description: Medicine unit not found
+
+  # ============================================
+  # MEDICINE MIN STOCK LEVEL
+  # ============================================
+  /medicine/min-stock/update/:
+    post:
+      tags: [Medicine Min Stock]
+      summary: Update Min Stock Level / Add Medicine
+      description: Update min_stock_level or add a new medicine (supports bulk mode)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineMinStockUpdateRequest'
+      responses:
+        '200':
+          description: Medicine(s) processed successfully
+        '400':
+          description: Failed to process any medicines
+
+  # ============================================
+  # MEDICINE REQUISITION
+  # ============================================
+  /medicine/requisition/create/:
+    post:
+      tags: [Medicine Requisition]
+      summary: Create Medicine Requisition
+      description: Create a weekly medicine requisition for a health center
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineRequisitionCreateRequest'
+      responses:
+        '200':
+          description: Medicine requisition created successfully
+        '400':
+          description: Validation error
+        '404':
+          description: Health center or nurse not found
+
+  /medicine/requisition/list/:
+    post:
+      tags: [Medicine Requisition]
+      summary: List Medicine Requisitions
+      description: List medicine requisitions for a health center with optional filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineRequisitionListRequest'
+      responses:
+        '200':
+          description: Requisitions retrieved successfully
+        '400':
+          description: health_center_id is required
+        '404':
+          description: Health center not found
+
+  /medicine/requisition/detail/:
+    post:
+      tags: [Medicine Requisition]
+      summary: Medicine Requisition Detail
+      description: Get details of a specific medicine requisition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineRequisitionDetailRequest'
+      responses:
+        '200':
+          description: Requisition details retrieved successfully
+        '400':
+          description: requisition_id is required
+        '404':
+          description: Requisition not found
+
+  /medicine/requisition/status-update/:
+    post:
+      tags: [Medicine Requisition]
+      summary: Update Medicine Requisition Status
+      description: Update the status of a medicine requisition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicineRequisitionStatusUpdateRequest'
+      responses:
+        '200':
+          description: Requisition status updated successfully
+        '400':
+          description: Invalid status or missing required fields
+        '404':
+          description: Requisition not found
+
+  # ============================================
+  # UNIFIED CHECK-IN (ATTENDANT/NURSE)
+  # ============================================
+  /check-in/:
+    post:
+      tags: [Check-In]
+      summary: Unified Check-In
+      description: Check-in for attendant/super_attendant (creche) or nurse/head_nurse (health center)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CheckInRequest'
+      responses:
+        '200':
+          description: Check-in successful
+        '401':
+          description: Face verification failed
+        '403':
+          description: Access denied
+        '409':
+          description: Already checked in today
+
+  /check-in/status/:
+    get:
+      tags: [Check-In]
+      summary: Check-In Status
+      description: Get current check-in status for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Check-in status retrieved successfully
+        '403':
+          description: Access denied
+
+  # ============================================
+  # ATTENDANT & NURSE MANAGEMENT (ADMIN)
+  # ============================================
+  /attendants/list/:
+    post:
+      tags: [Admin]
+      summary: Attendant List By Tea Garden
+      description: List attendants/super_attendants filtered by tea garden (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendantListRequest'
+      responses:
+        '200':
+          description: Attendants retrieved successfully
+        '400':
+          description: tea_garden_id is required
+        '403':
+          description: Access denied. Only admin users can view attendant list
+        '404':
+          description: Tea garden or creche not found
+
+  /nurses/list/:
+    post:
+      tags: [Admin]
+      summary: Nurse List By Tea Garden
+      description: List nurses filtered by tea garden (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NurseListRequest'
+      responses:
+        '200':
+          description: Nurses retrieved successfully
+        '400':
+          description: tea_garden_id is required
+        '403':
+          description: Access denied. Only admin users can view nurse list
+        '404':
+          description: Tea garden or health center not found
+
+  /promote-to-super/:
+    post:
+      tags: [Admin]
+      summary: Promote To Super
+      description: Promote an attendant to super_attendant or a nurse to head_nurse (admin only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromoteToSuperRequest'
+      responses:
+        '200':
+          description: Promotion successful
+        '400':
+          description: Invalid request or already promoted
+        '403':
+          description: Access denied. Only admin users can promote
+        '404':
+          description: Attendant or nurse not found

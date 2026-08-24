@@ -483,6 +483,8 @@ class DoctorCheckOutAPI(APIView):
             check_in.hygiene_maintained = hygiene_maintained_bool
             check_in.patients_visited_today = patients_count
             check_in.checkout_remarks = checkout_remarks
+            # Update attendance_date to match check_in_date at checkout time
+            check_in.attendance_date = check_in.check_in_date
             check_in.save()
             
             return Response({

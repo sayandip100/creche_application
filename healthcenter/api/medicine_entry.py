@@ -339,6 +339,7 @@ class MedicineEntryAPI(APIView):
                 'status_code': 200,
                 'message': 'Medicine entry recorded successfully',
                 'data': {
+                    
                     'requisition_id': requisition.id,
                     'requisition_date': requisition.requisition_date.isoformat(),
                     'status': requisition.status,

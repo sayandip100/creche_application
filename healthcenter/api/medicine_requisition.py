@@ -297,10 +297,15 @@ class MedicineRequisitionListAPI(APIView):
     
     Request Body: {
         "health_center_id": 1,
-        "status": "SUBMITTED",        # Optional filter: DRAFT, SUBMITTED, APPROVED, REJECTED, FULFILLED
-        "start_date": "2026-07-01",   # Optional filter by week start date
-        "end_date": "2026-07-31"      # Optional filter by week end date
+        "status": "SUBMITTED",        # Optional filter: DRAFT, SUBMITTED, APPROVED, REJECTED, FULFILLED (null/empty = all)
+        "start_date": "2026-07-01",   # Optional filter by requisition_date (>=)
+        "end_date": "2026-07-31"      # Optional filter by requisition_date (<=)
     }
+    
+    Note: Date filtering is based on the `requisition_date` column of the
+    `healthcenter_weeklymedicinerequisition` table, not the week start/end dates.
+    If `status` is null/empty, all requisitions between start_date and end_date
+    are returned. If `status` is provided, only matching status is returned.
     
     Response: {
         "status_code": 200,
@@ -368,11 +373,12 @@ class MedicineRequisitionListAPI(APIView):
                 if status_filter.upper() in valid_statuses:
                     filters['status'] = status_filter.upper()
 
+            # Date filtering is based on the `requisition_date` column
             if start_date:
-                filters['requisition_week_start__gte'] = start_date
+                filters['requisition_date__gte'] = start_date
 
             if end_date:
-                filters['requisition_week_end__lte'] = end_date
+                filters['requisition_date__lte'] = end_date
 
             requisitions = WeeklyMedicineRequisition.objects.filter(
                 **filters
@@ -387,10 +393,10 @@ class MedicineRequisitionListAPI(APIView):
                 medicines_data = []
                 for detail in details:
                     medicines_data.append({
-                        'medicine_id': detail.medicine.id,
-                        'medicine_name': detail.medicine.medicine_name,
-                        'medicine_code': detail.medicine.medicine_code or '',
-                        'available_stock_qty': detail.available_stock_qty,
+                        'id': detail.medicine.id,
+                        'name': detail.medicine.medicine_name,
+                        'code': detail.medicine.medicine_code or '',
+                        'current_stock_qty': detail.available_stock_qty,
                         'requested_qty': detail.requested_qty,
                         'auto_low_stock_flag': detail.auto_low_stock_flag,
                         'remarks': detail.remarks,

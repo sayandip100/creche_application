@@ -1199,10 +1199,12 @@ class Healthcenterlist(APIView):
         data = []
         for hc in health_centers:
             data.append({
-                
                 "id": hc.id,
                 "code": hc.code,
-                "name": hc.name
+                "name": hc.name,
+                "doctor_count": hc.doctors.count(),
+                "nurse_count": hc.nurses.count(),
+                "patient_count": hc.treatments.count()
             })
         return Response({
             "status_code": 200,

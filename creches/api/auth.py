@@ -308,7 +308,10 @@ class LoginAPI(APIView):
             data['tea_garden_id'] = tea_garden_id
 
         return Response({
-            'access': str(refresh.access_token),
+            #'access': str(refresh.access_token),
+            'access_token': str(refresh.access_token),
+            'refresh_token': str(refresh),
+            'token_type': 'Bearer',
             'data': data
         }, status=status.HTTP_200_OK)
 
@@ -440,6 +443,7 @@ class MobileLoginAPI(APIView):
 
     def post(self, request):
         # Validate user and generate JWT
+        
         try:
             serializer = LoginSerializer(data=request.data)
             if not serializer.is_valid():
