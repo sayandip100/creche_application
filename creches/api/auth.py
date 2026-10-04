@@ -7,11 +7,11 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from creches.models import Creche, CrecheAttendant, Child, ChildAttendance, ChildAttendanceDetail, FoodMonitoring , TeaGarden, ChildPhoto, ChildPhotoEmbedding, ChildGrowthMonitoring, CrecheAttendantPhoto, CrecheAttendantPhotoEmbedding
 from healthcenter.models import HealthCenter, Doctor, Nurse, PatientTreatment, Medicine, HealthCenterMedicineStock, MedicineStockTransaction, PatientTreatmentMedicine, WeeklyMedicineRequisition, WeeklyMedicineRequisitionDetail, DoctorAttendance, NurseAttendance, DoctorPhoto, DoctorPhotoEmbedding, NursePhoto, NursePhotoEmbedding
+from school.models import Staff, StaffPhoto
 from creches.serializers import LoginSerializer , AttendantRegisterSerializer , CrecheCreateSerializer, ChildRegisterSerializer
 from django.contrib.auth import get_user_model
 
 from django.utils import timezone
-from creches.utils import get_face_encoding
 from rest_framework.permissions import IsAuthenticated
 import numpy as np
 from django.db import transaction
@@ -436,7 +436,7 @@ class LogoutAPI(APIView):
 class MobileLoginAPI(APIView):
     """
     Mobile Login API - Returns simplified login response for mobile clients
-    Supports all user roles: superadmin, attendant, super_attendant, doctor, head_nurse, nurse
+    Supports all user roles: superadmin, attendant, super_attendant, doctor, head_nurse, nurse, teacher
     Includes: user info, access token, tea_garden_id, and login timestamp
     """
     permission_classes = [AllowAny]
@@ -480,6 +480,7 @@ class MobileLoginAPI(APIView):
         attendant = None
         doctor = None
         nurse = None
+        staff = None
         tea_garden_id = None
         
         if user.role in ['attendant', 'super_attendant']:
@@ -503,6 +504,11 @@ class MobileLoginAPI(APIView):
                 if nurse.health_center:
                     tea_garden_id = nurse.health_center.tea_garden.id
 
+        elif user.role == 'teacher':
+            staff = Staff.objects.filter(user=user).select_related('school').first()
+            if staff:
+                name = staff.name
+
         # Get photo URL based on role (with full absolute URL including IP/domain)
         photo_url = None
         if user.role in ['attendant', 'super_attendant'] and attendant:
@@ -511,6 +517,9 @@ class MobileLoginAPI(APIView):
             photo_url = request.build_absolute_uri(doctor.photo.url) if doctor.photo else None
         elif user.role in ['nurse', 'head_nurse'] and nurse:
             photo_url = request.build_absolute_uri(nurse.photo.url) if nurse.photo else None
+        elif user.role == 'teacher':
+            staff_photo = StaffPhoto.objects.filter(staff=staff).first() if staff else None
+            photo_url = request.build_absolute_uri(staff_photo.photo.url) if staff_photo else None
 
         # Build mobile response
         user_data = {
@@ -530,6 +539,7 @@ class MobileLoginAPI(APIView):
             'attendant_id': attendant.id if attendant else None,
             'doctor_id': doctor.id if doctor else None,
             'nurse_id': nurse.id if nurse else None,
+            'staff_id': staff.id if staff else None,
         }
 
         return Response({

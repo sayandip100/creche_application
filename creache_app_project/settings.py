@@ -55,7 +55,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'creches',
     'healthcenter',
-    'corsheaders'
+    'corsheaders',
+    'school.apps.SchoolConfig',
    
 ]
 

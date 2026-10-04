@@ -33,6 +33,10 @@ from healthcenter.api.medicine_entry import MedicineEntryAPI
 from healthcenter.api.medicine_unit import MedicineUnitListCreateAPI, MedicineUnitDetailAPI
 from healthcenter.api.medicine_min_stock import MedicineMinStockUpdateAPI
 from healthcenter.api.medicine_requisition import MedicineRequisitionCreateAPI, MedicineRequisitionListAPI, MedicineRequisitionDetailAPI, MedicineRequisitionStatusUpdateAPI
+from school.api.student_register import StudentRegisterAPI
+from school.api.staff_register import StaffRegisterAPI
+from school.api.student_attendance import (DetectStudentFromPhotoAPI,
+                                           MarkIndividualStudentAttendanceAPI)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -42,6 +46,10 @@ urlpatterns = [
     path('logout/', LogoutAPI.as_view(), name='logout'),
     path('register/', AttendantRegisterAPI.as_view(), name='attendant-register'),
     path('childrenregister/', ChildRegisterAPI.as_view(), name='child-register'),
+    path('students/register/', StudentRegisterAPI.as_view(), name='student-register'),
+    path('staff/register/', StaffRegisterAPI.as_view(), name='staff-register'),
+    path('attendance/detect-students/', DetectStudentFromPhotoAPI.as_view(), name='attendance-detect-students'),
+    path('attendance/student/mark/', MarkIndividualStudentAttendanceAPI.as_view(), name='attendance-student-mark'),
     path('children/list/', ChildListAPI.as_view(), name='child-list'),
     path('reports/child-attendance/', ChildAttendanceReportAPI.as_view(), name='child-attendance-report'),
     path('reports/food-monitoring/', FoodMonitoringReportAPI.as_view(), name='food-monitoring-report'),

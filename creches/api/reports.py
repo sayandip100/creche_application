@@ -1436,6 +1436,15 @@ class HealthCenterDetailsAPI(APIView):
 
         patients_data = []
         for patient in patients:
+            prescription_medicines = []
+            for med in patient.medicines.all():
+                prescription_medicines.append({
+                    'medicine_name': med.medicine.medicine_name,
+                    'medicine_code': med.medicine.medicine_code,
+                    'prescribed_qty': med.prescribed_qty,
+                    'issued_qty': med.issued_qty,
+                    'notes': med.notes,
+                })
             patients_data.append({
                 'id': patient.id,
                 'patient_name': patient.patient_name,
@@ -1443,7 +1452,17 @@ class HealthCenterDetailsAPI(APIView):
                 'contact_number': patient.contact_number,
                 'treatment_date': patient.treatment_date,
                 'whatsapp_sent': patient.whatsapp_sent,
-                'remarks': patient.remarks
+                'remarks': patient.remarks,
+                'prescription': {
+                    'symptoms': getattr(patient, 'symptoms', None),
+                    'diagnosis': getattr(patient, 'diagnosis', None),
+                    'doctor_remarks': getattr(patient, 'doctor_remarks', None),
+                    'doctor_prescription': getattr(patient, 'doctor_prescription', None),
+                    'prescription_image': request.build_absolute_uri(patient.prescription_image.url) if getattr(patient, 'prescription_image', None) else None,
+                    'doctor_prescription_image': request.build_absolute_uri(patient.doctor_prescription_image.url) if getattr(patient, 'doctor_prescription_image', None) else None,
+                    'followup_date': getattr(patient, 'followup_date', None),
+                    'medicines': prescription_medicines,
+                }
             })
 
         # Get medicine stock

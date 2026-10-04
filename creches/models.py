@@ -11,6 +11,7 @@ class CustomUser(AbstractUser):
         ('superadmin', 'Super Admin'),
         ('teagarden_head', 'Tea Garden Head'),
         ('staff', 'Staff'),
+        ('teacher', 'Teacher'),
     ]
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
 
