@@ -16,7 +16,7 @@ from school.serializers import StaffRegisterSerializer
 User = get_user_model()
 
 # External embedding API for staff registration
-STAFF_EMBEDDING_API_URL = "http://45.64.107.97:5010/api/v1/attendance/teacher"
+STAFF_EMBEDDING_API_URL = "http://45.64.107.97:5010/api/v1/photo-embedding"
 
 
 class StaffRegisterAPI(APIView):

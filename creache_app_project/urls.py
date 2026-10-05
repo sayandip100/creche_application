@@ -35,6 +35,7 @@ from healthcenter.api.medicine_min_stock import MedicineMinStockUpdateAPI
 from healthcenter.api.medicine_requisition import MedicineRequisitionCreateAPI, MedicineRequisitionListAPI, MedicineRequisitionDetailAPI, MedicineRequisitionStatusUpdateAPI
 from school.api.student_register import StudentRegisterAPI
 from school.api.staff_register import StaffRegisterAPI
+from school.api.register import RegisterAPI
 from school.api.student_attendance import (DetectStudentFromPhotoAPI,
                                            MarkIndividualStudentAttendanceAPI)
 
@@ -48,6 +49,7 @@ urlpatterns = [
     path('childrenregister/', ChildRegisterAPI.as_view(), name='child-register'),
     path('students/register/', StudentRegisterAPI.as_view(), name='student-register'),
     path('staff/register/', StaffRegisterAPI.as_view(), name='staff-register'),
+    path('school/register/', RegisterAPI.as_view(), name='school-register'),
     path('attendance/detect-students/', DetectStudentFromPhotoAPI.as_view(), name='attendance-detect-students'),
     path('attendance/student/mark/', MarkIndividualStudentAttendanceAPI.as_view(), name='attendance-student-mark'),
     path('children/list/', ChildListAPI.as_view(), name='child-list'),
